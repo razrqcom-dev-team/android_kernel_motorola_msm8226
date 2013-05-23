@@ -88,6 +88,7 @@ struct ion_buffer {
 	pid_t pid;
 	char alloc_client_name[ION_ALLOC_CLIENT_NAME_SIZE];
 };
+void ion_buffer_destroy(struct ion_buffer *buffer);
 
 /**
  * struct ion_heap_ops - ops to operate on a given heap
@@ -142,8 +143,13 @@ struct ion_heap_ops {
  *			allocating.  These are specified by platform data and
  *			MUST be unique
  * @name:		used for debugging
+ * @shrinker:		a shrinker for the heap, if the heap caches system
+ *			memory, it must define a shrinker to return it on low
+ *			memory conditions, this includes system memory cached
+ *			in the deferred free lists for heaps that support it
  * @priv:		private heap data
  * @free_list:		free list head if deferred free is used
+ * @free_list_size	size of the deferred free list in bytes
  * @lock:		protects the free list
  * @waitqueue:		queue to wait on from deferred free thread
  * @task:		task struct of deferred free thread
@@ -163,8 +169,10 @@ struct ion_heap {
 	unsigned long flags;
 	unsigned int id;
 	const char *name;
+	struct shrinker shrinker;
 	void *priv;
 	struct list_head free_list;
+	size_t free_list_size;
 	struct rt_mutex lock;
 	wait_queue_head_t waitqueue;
 	struct task_struct *task;
@@ -221,6 +229,43 @@ void ion_heap_unmap_kernel(struct ion_heap *, struct ion_buffer *);
 int ion_heap_map_user(struct ion_heap *, struct ion_buffer *,
 			struct vm_area_struct *);
 int ion_heap_buffer_zero(struct ion_buffer *buffer);
+
+/**
+ * ion_heap_init_deferred_free -- initialize deferred free functionality
+ * @heap:		the heap
+ *
+ * If a heap sets the ION_HEAP_FLAG_DEFER_FREE flag this function will
+ * be called to setup deferred frees. Calls to free the buffer will
+ * return immediately and the actual free will occur some time later
+ */
+int ion_heap_init_deferred_free(struct ion_heap *heap);
+
+/**
+ * ion_heap_freelist_add - add a buffer to the deferred free list
+ * @heap:		the heap
+ * @buffer: 		the buffer
+ *
+ * Adds an item to the deferred freelist.
+ */
+void ion_heap_freelist_add(struct ion_heap *heap, struct ion_buffer *buffer);
+
+/**
+ * ion_heap_freelist_drain - drain the deferred free list
+ * @heap:		the heap
+ * @size:		ammount of memory to drain in bytes
+ *
+ * Drains the indicated amount of memory from the deferred freelist immediately.
+ * Returns the total amount freed.  The total freed may be higher depending
+ * on the size of the items in the list, or lower if there is insufficient
+ * total memory on the freelist.
+ */
+size_t ion_heap_freelist_drain(struct ion_heap *heap, size_t size);
+
+/**
+ * ion_heap_freelist_size - returns the size of the freelist in bytes
+ * @heap:		the heap
+ */
+size_t ion_heap_freelist_size(struct ion_heap *heap);
 
 
 /**
@@ -291,8 +336,6 @@ struct ion_page_pool {
 	struct list_head high_items;
 	struct list_head low_items;
 	struct mutex mutex;
-	void *(*alloc)(struct ion_page_pool *pool);
-	void (*free)(struct ion_page_pool *pool, struct page *page);
 	gfp_t gfp_mask;
 	unsigned int order;
 	struct plist_node list;
@@ -302,5 +345,15 @@ struct ion_page_pool *ion_page_pool_create(gfp_t gfp_mask, unsigned int order);
 void ion_page_pool_destroy(struct ion_page_pool *);
 void *ion_page_pool_alloc(struct ion_page_pool *);
 void ion_page_pool_free(struct ion_page_pool *, struct page *);
+
+/** ion_page_pool_shrink - shrinks the size of the memory cached in the pool
+ * @pool:		the pool
+ * @gfp_mask:		the memory type to reclaim
+ * @nr_to_scan:		number of items to shrink in pages
+ *
+ * returns the number of items freed in pages
+ */
+int ion_page_pool_shrink(struct ion_page_pool *pool, gfp_t gfp_mask,
+			  int nr_to_scan);
 
 #endif /* _ION_PRIV_H */
