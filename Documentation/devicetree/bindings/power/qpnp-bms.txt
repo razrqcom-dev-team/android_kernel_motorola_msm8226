@@ -1,0 +1,381 @@
+Qualcomm's QPNP PMIC Battery Management System driver
+
+QPNP PMIC BMS provides interface to clients to read properties related
+to the battery. It's main function is to calculate the State of Charge (SOC),
+a 0-100 percentage representing the amount of charge left in the battery.
+Also a separate node structure is needed to support the BMS Profile Tables.
+
+There are two required peripherals in the BMS driver, both implemented as
+subnodes in the example. These peripherals must not be disabled if the BMS
+device is to enabled:
+- qcom,bms-bms : The main BMS device. Supports battery monitoring controls and
+		sensors.
+- qcom,bms-iadc : The BMS IADC peripheral in the IADC device. This is required
+		to determine whether the BMS is using an internal or external
+		rsense to accumulate the Coulomb Counter and read current.
+
+Additionally, an optional subnode may be included:
+- qcom,battery-data : A phandle to a node containing the available batterydata
+		profiles. See the batterydata bindings documentation for more
+		details.
+
+Parent node required properties:
+- compatible : should be "qcom,qpnp-bms" for the BM driver.
+- qcom,r-sense-uohm : sensor resistance in in micro-ohms.
+- qcom,v-cutoff-uv : cutoff voltage where the battery is considered dead in
+			micro-volts.
+- qcom,max-voltage-uv : maximum voltage for the battery in micro-volts.
+- qcom,r-conn-mohm : connector resistance in milli-ohms.
+- qcom,shutdown-soc-valid-limit : If the ocv upon restart is within this
+			distance of the shutdown ocv, the BMS will try to force
+			the new SoC to the old one to provide charge continuity.
+			That is to say,
+				if (abs(shutdown-soc - current-soc) < limit)
+				then use old SoC.
+- qcom,adjust-soc-low-threshold : The low threshold for when the BMS algorithm
+			starts adjusting. If the estimated SoC is not below
+			this percentage, do not adjust.
+- qcom,ocv-voltage-low-threshold-uv : The low voltage threshold for the
+			"flat portion" of the discharge curve. The bms will not
+			accept new ocvs between these thresholds.
+- qcom,ocv-voltage-high-threshold-uv : The high voltage threshold for
+			the "flat portion" of the discharge curve.
+			The bms will not accept new ocvs between these
+			thresholds.
+- qcom,low-soc-calculate-soc-threshold : The SoC threshold for when
+			the periodic calculate_soc work speeds up. This ensures
+			SoC is updated in userspace constantly when we are near
+			shutdown.
+- qcom,low-voltage-threshold : The battery voltage threshold in micro-volts for
+			when the BMS tries to wake up and hold a wakelock to
+			ensure a clean shutdown.
+- qcom,low-soc-calculate-soc-ms : The time period between subsequent
+			SoC recalculations when the current SoC is below
+			qcom,low-soc-calculate-soc-threshold or when battery
+			voltage is below qcom,low-voltage-threshold.
+- qcom,calculate-soc-ms : The time period between subsequent SoC
+			recalculations when the current SoC is above or equal
+			qcom,low-soc-calculate-soc-threshold.
+- qcom,chg-term-ua : current in micro-amps when charging is considered done.
+			As soon as current passes this point, charging is
+			stopped.
+- qcom,batt-type: Type of battery used. This is an integer that corresponds
+			to the enum defined in
+			include/linux/mfd/pm8xxx/batterydata-lib.h
+- qcom,high-ocv-correction-limit-uv: how much the bms will correct OCV when
+			voltage is above the flat portion of the discharge
+			curve.
+- qcom,low-ocv-correction-limit-uv: how much the bms will correct OCV when
+			voltage is below the flat portion of the discharge
+			curve.
+- qcom,hold-soc-est: if the voltage-based estimated SoC is above this percent,
+			the BMS will clamp SoC to be at least 1.
+- qcom,tm-temp-margin: if the pmic die temperature changes by more than this
+			value, recalibrate the ADCs. The unit of this property
+			is in millidegrees celsius.
+- qcom,min-fcc-learning-soc: An interger value which defines the minimum SOC
+			to start FCC learning. This is applicable only if
+			FCC learning is enabled.
+- qcom,min-fcc-ocv-pc:	An interger value which defines the minimum PC-lookup(OCV)
+			to start FCC learning. This is applicable only if
+			FCC learning is enabled.
+- qcom,min-fcc-learning-samples: An interger value which defines the minimum
+			number of the FCC measurement cycles required to
+			generate an FCC update. This is applicable only
+			if the FCC learning is enabled.
+- qcom,fcc-resolution:	An integer which defines the fcc resolution used
+			for storing the FCC(mAh) in the 8-bit BMS register.
+			For example - A value of 10 indicates:
+			FCC value (in mAh) = (8-bit register value) * 10.
+- qcom,bms-vadc: Corresponding VADC device's phandle.
+- qcom,bms-iadc: Corresponding IADC device's phandle.
+
+Parent node optional properties:
+- qcom,ignore-shutdown-soc: A boolean that controls whether BMS will
+			try to force the startup SoC to be the same as the
+			shutdown SoC. Defining it will make BMS ignore the
+			shutdown SoC.
+- qcom,use-voltage-soc : A boolean that controls whether BMS will use
+			voltage-based SoC instead of a coulomb counter based
+			one. Voltage-based SoC will not guarantee linearity.
+- qcom,use-external-rsense : A boolean that controls whether BMS will use
+			an external sensor resistor instead of the default
+			RDS of the batfet.
+- qcom,use-ocv-thresholds : A boolean that controls whether BMS will take
+			new OCVs only between the defined thresholds.
+- qcom,enable-fcc-learning: A boolean that defines if FCC learning is enabled.
+- qcom,bms-adc_tm: Corresponding ADC_TM device's phandle to set recurring measurements
+		and receive notifications for die_temperature, vbatt.
+
+
+All sub node required properties:
+- reg : offset and length of the PMIC peripheral register map.
+
+qcom,bms-bms node required properties:
+- interrupts : the interrupt mappings.
+		The format should be
+		<slave-id peripheral-id interrupt-number>.
+- interrupt-names : names for the mapped bms interrupt
+		The following interrupts are required:
+		0 : vsense_for_r
+		1 : vsense_avg
+		2 : sw_cc_thr
+		3 : ocv_thr
+		4 : charge_begin
+		5 : good_ocv
+		6 : ocv_for_r
+		7 : cc_thr
+
+Example:
+pm8941_bms: qcom,bms {
+	spmi-dev-container;
+	compatible = "qcom,qpnp-bms";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	status = "disabled";
+
+	qcom,r-sense-uohm = <10000>;
+	qcom,v-cutoff-uv = <3400000>;
+	qcom,max-voltage-uv = <4200000>;
+	qcom,r-conn-mohm = <18>;
+	qcom,shutdown-soc-valid-limit = <20>;
+	qcom,ocv-voltage-low-threshold-uv = <3650000>;
+	qcom,ocv-voltage-high-threshold-uv = <3750000>;
+	qcom,adjust-soc-low-threshold = <15>;
+	qcom,low-soc-calculate-soc-threshold = <15>;
+	qcom,low-voltage-threshold = <3420000>;
+	qcom,low-soc-calculate-soc-ms = <5000>;
+	qcom,calculate-soc-ms = <20000>;
+	qcom,chg-term-ua = <100000>;
+	qcom,batt-type = <0>;
+	qcom,low-ocv-correction-limit-uv = <100>;
+	qcom,high-ocv-correction-limit-uv = <50>;
+	qcom,hold-soc-est = <3>;
+	qcom,tm-temp-margin = <5000>;
+	qcom,battery-data = <&mtp_batterydata>;
+	qcom,bms-vadc = <&pm8941_vadc>;
+	qcom,bms-iadc = <&pm8941_iadc>;
+	qcom,bms-adc_tm = <&pm8941_adc_tm>;
+
+	qcom,bms-iadc@3800 {
+		reg = <0x3800 0x100>;
+	};
+
+	qcom,bms-bms@4000 {
+		reg = <0x4000 0x100>;
+		interrupts =	<0x0 0x40 0x0>,
+				<0x0 0x40 0x1>,
+				<0x0 0x40 0x2>,
+				<0x0 0x40 0x3>,
+				<0x0 0x40 0x4>,
+				<0x0 0x40 0x5>,
+				<0x0 0x40 0x6>,
+				<0x0 0x40 0x7>;
+
+		interrupt-names = "vsense_for_r",
+				  "vsense_avg",
+				  "sw_cc_thr",
+				  "ocv_thr",
+				  "charge_begin",
+				  "good_ocv",
+				  "ocv_for_r",
+				  "cc_thr";
+	};
+};
+
+
+QCOM BMS Profile Tables
+
+The BMS Profiles are setup such that a Parent node
+is used to find all compatible BMS Profiles which are
+represented as Child nodes.
+
+Please note that all Negative values must be represented
+as there 32 bit 2s complement Hex equavalent as all
+dts values are unsigned.  So for the example below -20
+is represented as 0xFFFFFFEC.
+
+It will also be up to the designer to ensure that all
+battery profiles included in the parent node do not have
+over lapping batt-tbl-id ranges so that correct Child node
+can be selected by software.
+
+Parent node required properties:
+ - compatible = "qcom,batt-tbls": This parameter is expected to
+				  be define in this manner so that the
+				  BMS driver can find it.
+
+Child node required properties:
+ - qcom,batt-tbl-name: Name of the Battery this Profile defines
+ - qcom,batt-tbl-id: Range of Battery ID Raw ADC values that defines
+		     this Profile should be selected ex. <min max>
+
+
+ - qcom,batt-tbl-fcc : full charge capacity (mAmpHour)
+ - qcom,batt-tbl-default-rbatt-mohm : the default value of battery resistance
+			to use when readings from bms are not available.
+ - qcom,batt-tbl-rbatt-capacitive-mohm: the resistance to be added to
+			compensate for battery capacitance
+ - qcom,batt-tbl-flat-ocv-threshold-uv : the voltage where the battery's
+			discharge curve starts flattening out.
+
+fcc_temp_lut : table to get fcc at a given temp
+ - qcom,fcc-temp-lut-cols : Number of Columns in the array in this case
+			Number of Temperature Levels
+ - qcom,fcc-temp-lut-x : Temperature Levels
+ - qcom,fcc-temp-lut-y : FCC values
+
+fcc_sf_lut : table to get fcc scale factor at a number of Charge Cycles
+ - qcom,fcc-sf-lut-cols : Number of Columns in the array in this case
+			Number of Charge Cycle Levels
+ - qcom,fcc-sf-lut-x : Charge Cycle Levels
+ - qcom,fcc-sf-lut-y : Percentages to scale FCC
+
+pc_sf_lut : table to get percent charge scaling factor given cycles
+	    and percent charge
+ - qcom,pc-sf-lut-rows : Number of Rows in the array in this case
+		       Number of Charge Percent Levels
+ - qcom,pc-sf-lut-cols : Number of Columns in the array in this case
+			Number of Charge Cycle Levels
+ - qcom,pc-sf-lut-row-entries : Charge Cycle Levels
+ - qcom,pc-sf-lut-percent : Charge Percent Levels
+ - qcom,pc-sf-lut-sf : Array of Scale Factor values @
+		     Charge Cycle vs. Charge Percent values
+
+pc_temp_ocv_lut : table to get percent charge given batt temp and cycles
+ - qcom,pc-temp-ocv-lut-rows : Number of Rows in the array in this case
+		       Number of Charge Percent Levels
+ - qcom,pc-temp-ocv-lut-cols : Number of Columns in the array in this case
+			Number of Temperature Levels
+ - qcom,pc-temp-ocv-lut-temp : Temperature Levels
+ - qcom,pc-temp-ocv-lut-percent : Charge Percent Levels
+ - qcom,pc-temp-ocv-lut-ocv : Array of OCV values @
+			Temperature vs. Charge Percent
+
+Child node optional properties:
+
+ - qcom,batt-tbl-delta-rbatt-mohm : the resistance to be added towards lower
+			soc to compensate for battery capacitance.
+
+rbatt_sf_lut : table to get battery resistance scaling factor given
+	       temperature and percent charge
+ - qcom,rbatt-sf-lut-rows : Number of Rows in the array in this case
+		       Number of Charge Percent Levels
+ - qcom,rbatt-sf-lut-cols : Number of Columns in the array in this case
+			Number of Temperature Levels
+ - qcom,rbatt-sf-lut-row-entries : Temperature Levels
+ - qcom,rbatt-sf-lut-percent : Charge Percent Levels
+ - qcom,rbatt-sf-lut-sf : Array of RBatt values @
+		       Temperature vs. Charge Percent
+
+Example:
+bms_tbls: qcom,batt-tbls {
+	compatible = "qcom,batt-tbls";
+
+	qcom,batt-tbl-one {
+		qcom,batt-tbl-name = "qcom,palladium-1500";
+		qcom,batt-tbl-id = <0x7F40 0x7F5A>;
+
+		qcom,batt-tbl-fcc = <1500>;
+		qcom,batt-tbl-default-rbatt-mohm = <236>;
+		qcom,batt-tbl-rbatt-capacitive-mohm = <50>;
+		qcom,batt-tbl-flat-ocv-threshold-uv = <3800000>;
+
+		qcom,fcc-temp-lut-cols = <5>;
+		qcom,fcc-temp-lut-x = <0xFFFFFFEC 0 25 40 65>;
+		qcom,fcc-temp-lut-y = <1492 1492 1493 1483 1502>;
+
+		qcom,fcc-sf-lut-cols = <6>;
+		qcom,fcc-sf-lut-x = <1 100 200 300 400 500>;
+		qcom,fcc-sf-lut-y = <100 100 100 100 100 100>;
+
+		qcom,pc-sf-lut-rows = <10>;
+		qcom,pc-sf-lut-cols = <5>;
+		qcom,pc-sf-lut-row-entries = <100 200 300 400 500>;
+		qcom,pc-sf-lut-percent =
+				<100 90 80 70 60 50 40 30 20 10>;
+		qcom,pc-sf-lut-sf = <100 100 100 100 100>,
+				<100 100 100 100 100>,
+				<100 100 100 100 100>,
+				<100 100 100 100 100>,
+				<100 100 100 100 100>,
+				<100 100 100 100 100>,
+				<100 100 100 100 100>,
+				<100 100 100 100 100>,
+				<100 100 100 100 100>,
+				<100 100 100 100 100>;
+
+
+		pc-temp-ocv-lut-rows = <29>;
+		pc-temp-ocv-lut-cols = <5>;
+		pc-temp-ocv-lut-temp = <0xFFFFFFEC 0 25 40 65>;
+		pc-temp-ocv-lut-percent = <100 95 90 85 80 75 70 65 60 55 50 45 40
+					35 30 25 20 15 10 9 8 7 6 5
+					4 3 2 1 0>;
+		pc-temp-ocv-lut-ocv = <4173 4167 4163 4156 4154>,
+				    <4104 4107 4108 4102 4104>,
+				    <4057 4072 4069 4061 4060>,
+				    <3973 4009 4019 4016 4020>,
+				    <3932 3959 3981 3982 3983>,
+				    <3899 3928 3954 3950 3950>,
+				    <3868 3895 3925 3921 3920>,
+				    <3837 3866 3898 3894 3892>,
+				    <3812 3841 3853 3856 3862>,
+				    <3794 3818 3825 3823 3822>,
+				    <3780 3799 3804 3804 3803>,
+				    <3768 3787 3790 3788 3788>,
+				    <3757 3779 3778 3775 3776>,
+				    <3747 3772 3771 3766 3765>,
+				    <3736 3763 3766 3760 3746>,
+				    <3725 3749 3756 3747 3729>,
+				    <3714 3718 3734 3724 3706>,
+				    <3701 3703 3696 3689 3668>,
+				    <3675 3695 3682 3675 3662>,
+				    <3670 3691 3680 3673 3661>,
+				    <3661 3686 3679 3672 3656>,
+				    <3649 3680 3676 3669 3641>,
+				    <3633 3669 3667 3655 3606>,
+				    <3610 3647 3640 3620 3560>,
+				    <3580 3607 3596 3572 3501>,
+				    <3533 3548 3537 3512 3425>,
+				    <3457 3468 3459 3429 3324>,
+				    <3328 3348 3340 3297 3172>,
+				    <3000 3000 3000 3000 3000>;
+
+		qcom,rbatt-sf-lut-rows = <29>;
+		qcom,rbatt-sf-lut-cols = <5>;
+		qcom,rbatt-sf-lut-row_entries = <0xFFFFFFEC 0 20 40 65>;
+		qcom,rbatt-sf-lut-percent = <100 95 90 85 80 75 70 65 60 55 50
+					    45 40 35 30 25 20 15 10 9 8 7 6 5
+					    4 3 2 1 0>;
+		qcom,rbatt-sf-lut-sf = <357 187 100 91 91>,
+				     <400 208 105 94 94>,
+				     <390 204 106 95 96>,
+				     <391 201 108 98 98,
+				     <391 202 110 98 100>,
+				     <390 200 110 99 102>,
+				     <389 200 110 99 102>,
+				     <393 202 101 93 100>,
+				     <407 205 99 89 94>,
+				     <428 208 100 91 96>,
+				     <455 212 102 92 98>,
+				     <495 220 104 93 101>,
+				     <561 232 107 95 102>,
+				     <634 245 112 98 98>,
+				     <714 258 114 98 98>,
+				     <791 266 114 97 100>,
+				     <871 289 108 95 97>,
+				     <973 340 124 108 105>,
+				     <489 241 109 96 99>,
+				     <511 246 110 96 99>,
+				     <534 252 111 95 98>,
+				     <579 263 112 96 96>,
+				     <636 276 111 95 97>,
+				     <730 294 109 96 99>,
+				     <868 328 112 98 10>,
+				     <1089 374 119 101 115>,
+				     <1559 457 128 105 213>,
+				     <12886 1026 637 422 3269>,
+				     <170899 127211 98968 88907 77102>;
+	};
+};
