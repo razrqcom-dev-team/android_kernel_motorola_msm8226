@@ -292,7 +292,12 @@ static int mdp3_dmap_config(struct mdp3_dma *dma,
 	MDP3_REG_WRITE(MDP3_REG_DMA_P_IBUF_Y_STRIDE, source_config->stride);
 	MDP3_REG_WRITE(MDP3_REG_DMA_P_OUT_XY, dma_p_out_xy);
 
-	MDP3_REG_WRITE(MDP3_REG_DMA_P_FETCH_CFG, 0x40);
+	/*
+	 * NOTE: MDP_DMA_P_FETCH_CFG: max_burst_size need to use value 4, not
+	 * the default 16 for MDP hang issue workaround
+	 */
+	MDP3_REG_WRITE(MDP3_REG_DMA_P_FETCH_CFG, 0x20);
+
 
 	dma->source_config = *source_config;
 	dma->output_config = *output_config;

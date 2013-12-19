@@ -281,6 +281,18 @@ static struct msm_vidc_ctrl msm_vdec_ctrls[] = {
 		.qmenu = NULL,
 		.cluster = 0,
 	},
+	{
+		.id = V4L2_CID_MPEG_VIDC_VIDEO_LIMIT_INPUT_BUFFER_SIZE,
+		.name = "Limit input buffer size",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.minimum = 0,
+		.maximum = (4096 * 2304 * 3/2)/2,
+		.default_value = 0,
+		.step = 1,
+		.menu_skip_mask = 0,
+		.qmenu = NULL,
+		.cluster = 0,
+	},
 };
 
 #define NUM_CTRLS ARRAY_SIZE(msm_vdec_ctrls)
@@ -295,6 +307,12 @@ static u32 get_frame_size_compressed(int plane,
 					u32 height, u32 width)
 {
 	return (width * height * 3/2)/4;
+}
+
+static u32 get_min_input_buffer_size(u32 frame_size, u32 limited_size)
+{
+	return ((limited_size > 0) && (limited_size < frame_size))
+			? limited_size : frame_size;
 }
 
 struct msm_vidc_format vdec_formats[] = {
@@ -358,14 +376,6 @@ struct msm_vidc_format vdec_formats[] = {
 		.name = "HEVC",
 		.description = "HEVC compressed format",
 		.fourcc = V4L2_PIX_FMT_HEVC,
-		.num_planes = 1,
-		.get_frame_size = get_frame_size_compressed,
-		.type = OUTPUT_PORT,
-	},
-	{
-		.name = "HEVC_HYBRID",
-		.description = "HEVC compressed format",
-		.fourcc = V4L2_PIX_FMT_HEVC_HYBRID,
 		.num_planes = 1,
 		.get_frame_size = get_frame_size_compressed,
 		.type = OUTPUT_PORT,
@@ -649,6 +659,7 @@ int msm_vdec_g_fmt(struct msm_vidc_inst *inst, struct v4l2_format *f)
 	int rc = 0;
 	int i;
 	struct hal_buffer_requirements *buff_req_buffer;
+	u32 frame_size = 0;
 	if (!inst || !f || !inst->core || !inst->core->device) {
 		dprintk(VIDC_ERR,
 			"Invalid input, inst = %p, format = %p\n", inst, f);
@@ -690,10 +701,13 @@ int msm_vdec_g_fmt(struct msm_vidc_inst *inst, struct v4l2_format *f)
 		}
 		if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 			for (i = 0; i < fmt->num_planes; ++i) {
-				f->fmt.pix_mp.plane_fmt[i].sizeimage =
-					fmt->get_frame_size(i,
+				frame_size = fmt->get_frame_size(i,
 						inst->capability.height.max,
 						inst->capability.width.max);
+				f->fmt.pix_mp.plane_fmt[i].sizeimage =
+					get_min_input_buffer_size(
+						frame_size,
+						inst->capability.limited_size);
 				inst->bufq[OUTPUT_PORT].
 					vb2_bufq.plane_sizes[i] =
 					f->fmt.pix_mp.plane_fmt[i].sizeimage;
@@ -812,6 +826,7 @@ int msm_vdec_s_fmt(struct msm_vidc_inst *inst, struct v4l2_format *f)
 	int ret = 0;
 	int i;
 	struct hal_buffer_requirements *buff_req_buffer;
+	u32 frame_size = 0;
 	if (!inst || !f) {
 		dprintk(VIDC_ERR,
 			"Invalid input, inst = %p, format = %p\n", inst, f);
@@ -902,9 +917,12 @@ int msm_vdec_s_fmt(struct msm_vidc_inst *inst, struct v4l2_format *f)
 		frame_sz.width = inst->prop.width;
 		frame_sz.height = inst->prop.height;
 		msm_comm_try_set_prop(inst, HAL_PARAM_FRAME_SIZE, &frame_sz);
+		frame_size = fmt->get_frame_size(0,
+				    inst->capability.height.max,
+				    inst->capability.width.max);
 		f->fmt.pix_mp.plane_fmt[0].sizeimage =
-			fmt->get_frame_size(0, inst->capability.height.max,
-					inst->capability.width.max);
+			get_min_input_buffer_size(frame_size,
+				inst->capability.limited_size);
 		f->fmt.pix_mp.num_planes = fmt->num_planes;
 		for (i = 0; i < fmt->num_planes; ++i) {
 			inst->bufq[OUTPUT_PORT].vb2_bufq.plane_sizes[i] =
@@ -976,6 +994,7 @@ static int msm_vdec_queue_setup(struct vb2_queue *q,
 	struct hfi_device *hdev;
 	struct hal_buffer_count_actual new_buf_count;
 	enum hal_property property_id;
+	u32 frame_size = 0;
 	if (!q || !num_buffers || !num_planes
 		|| !sizes || !q->drv_priv) {
 		dprintk(VIDC_ERR, "Invalid input, q = %p, %p, %p\n",
@@ -998,9 +1017,12 @@ static int msm_vdec_queue_setup(struct vb2_queue *q,
 				*num_buffers > MAX_NUM_OUTPUT_BUFFERS)
 			*num_buffers = MIN_NUM_OUTPUT_BUFFERS;
 		for (i = 0; i < *num_planes; i++) {
-			sizes[i] = inst->fmts[OUTPUT_PORT]->get_frame_size(
+			frame_size = inst->fmts[OUTPUT_PORT]->get_frame_size(
 					i, inst->capability.height.max,
 					inst->capability.width.max);
+			sizes[i] = get_min_input_buffer_size(
+					frame_size,
+					inst->capability.limited_size);
 		}
 		property_id = HAL_PARAM_BUFFER_COUNT_ACTUAL;
 		new_buf_count.buffer_type = HAL_BUFFER_INPUT;
@@ -1418,6 +1440,13 @@ static int try_set_ctrl(struct msm_vidc_inst *inst, struct v4l2_ctrl *ctrl)
 		property_id = HAL_PARAM_VDEC_FRAME_ASSEMBLY;
 		hal_property.enable = ctrl->val;
 		pdata = &hal_property;
+		break;
+	}
+	case V4L2_CID_MPEG_VIDC_VIDEO_LIMIT_INPUT_BUFFER_SIZE:
+	{
+		inst->capability.limited_size = ctrl->val;
+		dprintk(VIDC_DBG,
+			"Limiting input buffer size to :%u\n", ctrl->val);
 		break;
 	}
 	default:

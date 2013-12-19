@@ -25,6 +25,7 @@
 #define SW_RESET BIT(2)
 #define SW_RESET_PLL BIT(0)
 #define PWRDN_B BIT(7)
+#define CLK_PREPARE_RETRY_MAX 4
 
 static struct dsi_clk_desc dsi_pclk;
 
@@ -221,8 +222,21 @@ static int mdss_dsi_clk_prepare(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 
 	rc = clk_prepare(ctrl_pdata->byte_clk);
 	if (rc) {
-		pr_err("%s: Failed to prepare dsi byte clk\n", __func__);
-		goto byte_clk_err;
+		int i;
+		for (i = 1; i < CLK_PREPARE_RETRY_MAX; i++) {
+			pr_debug("%s(%d): Failed to prepare dsi byte clk\n",
+								__func__, i);
+			rc = clk_prepare(ctrl_pdata->byte_clk);
+			if (!rc)
+				break;
+		}
+
+		if (i >= CLK_PREPARE_RETRY_MAX) {
+			pr_err("%s(%d): Still failed to prepare dsi byte clk\n",
+								__func__, i);
+			goto byte_clk_err;
+		} else
+			pr_warning("%s: byte_clk is locked\n", __func__);
 	}
 
 	rc = clk_prepare(ctrl_pdata->pixel_clk);
@@ -504,7 +518,7 @@ void mdss_dsi_phy_init(struct mdss_panel_data *pdata)
 		return;
 	}
 
-	pd = &(((ctrl_pdata->panel_data).panel_info.mipi).dsi_phy_db);
+	pd = ((ctrl_pdata->panel_data).panel_info.mipi).dsi_phy_db;
 
 	/* Strength ctrl 0 */
 	MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x0484, pd->strength[0]);
@@ -564,7 +578,7 @@ void mdss_dsi_phy_init(struct mdss_panel_data *pdata)
 		for (i = 0; i < 9; i++) {
 			offset = i + (ln * 9);
 			MIPI_OUTP((ctrl_pdata->ctrl_base) + off,
-							pd->lanecfg[offset]);
+							pd->laneCfg[offset]);
 			wmb();
 			off += 4;
 		}
@@ -583,7 +597,7 @@ void mdss_dsi_phy_init(struct mdss_panel_data *pdata)
 
 	off = 0x04b4;	/* phy BIST ctrl 0 - 5 */
 	for (i = 0; i < 6; i++) {
-		MIPI_OUTP((ctrl_pdata->ctrl_base) + off, pd->bistctrl[i]);
+		MIPI_OUTP((ctrl_pdata->ctrl_base) + off, pd->bistCtrl[i]);
 		wmb();
 		off += 4;
 	}

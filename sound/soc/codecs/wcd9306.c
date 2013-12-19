@@ -188,7 +188,7 @@ enum {
 
 static const DECLARE_TLV_DB_SCALE(digital_gain, 0, 1, 0);
 static const DECLARE_TLV_DB_SCALE(line_gain, 0, 7, 1);
-static const DECLARE_TLV_DB_SCALE(analog_gain, 0, 25, 1);
+static const DECLARE_TLV_DB_SCALE(analog_gain, 0, 5, 1);
 static struct snd_soc_dai_driver tapan_dai[];
 static const DECLARE_TLV_DB_SCALE(aux_pga_gain, 0, 2, 0);
 
@@ -520,8 +520,14 @@ static int tapan_pa_gain_get(struct snd_kcontrol *kcontrol,
 
 	if (ear_pa_gain == 0x00) {
 		ucontrol->value.integer.value[0] = 0;
-	} else if (ear_pa_gain == 0x04) {
+	} else if (ear_pa_gain == 0x01) {
 		ucontrol->value.integer.value[0] = 1;
+	} else if (ear_pa_gain == 0x02) {
+		ucontrol->value.integer.value[0] = 2;
+	} else if (ear_pa_gain == 0x03) {
+		ucontrol->value.integer.value[0] = 3;
+	} else if (ear_pa_gain == 0x04) {
+		ucontrol->value.integer.value[0] = 4;
 	} else  {
 		pr_err("%s: ERROR: Unsupported Ear Gain = 0x%x\n",
 				__func__, ear_pa_gain);
@@ -547,6 +553,15 @@ static int tapan_pa_gain_put(struct snd_kcontrol *kcontrol,
 		ear_pa_gain = 0x00;
 		break;
 	case 1:
+		ear_pa_gain = 0x20;
+		break;
+	case 2:
+		ear_pa_gain = 0x40;
+		break;
+	case 3:
+		ear_pa_gain = 0x60;
+		break;
+	case 4:
 		ear_pa_gain = 0x80;
 		break;
 	default:
@@ -1015,9 +1030,11 @@ static int tapan_config_compander(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static const char * const tapan_ear_pa_gain_text[] = {"POS_6_DB", "POS_2_DB"};
+static const char * const tapan_ear_pa_gain_text[] = {
+	"POS_6_DB", "POS_4P5_DB", "POS_3_DB", "POS_1P5_DB", "POS_0_DB"
+};
 static const struct soc_enum tapan_ear_pa_gain_enum[] = {
-		SOC_ENUM_SINGLE_EXT(2, tapan_ear_pa_gain_text),
+		SOC_ENUM_SINGLE_EXT(5, tapan_ear_pa_gain_text),
 };
 
 static const char *const tapan_anc_func_text[] = {"OFF", "ON"};
@@ -3132,13 +3149,27 @@ static void tapan_shutdown(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
 {
 	struct wcd9xxx *tapan_core = dev_get_drvdata(dai->codec->dev->parent);
+	struct tapan_priv *tapan = snd_soc_codec_get_drvdata(dai->codec);
+	u32 active = 0;
+
 	dev_dbg(dai->codec->dev, "%s(): substream = %s  stream = %d\n",
 		 __func__, substream->name, substream->stream);
+
+	if (dai->id <= NUM_CODEC_DAIS) {
+		if (tapan->dai[dai->id].ch_mask) {
+			active = 1;
+			dev_dbg(dai->codec->dev, "%s(): Codec DAI: chmask[%d] = 0x%lx\n",
+				 __func__, dai->id,
+				 tapan->dai[dai->id].ch_mask);
+		}
+	}
 	if ((tapan_core != NULL) &&
 	    (tapan_core->dev != NULL) &&
-	    (tapan_core->dev->parent != NULL)) {
+	    (tapan_core->dev->parent != NULL) &&
+	    (active == 0)) {
 		pm_runtime_mark_last_busy(tapan_core->dev->parent);
 		pm_runtime_put(tapan_core->dev->parent);
+		dev_dbg(dai->codec->dev, "%s: unvote requested", __func__);
 	}
 }
 
@@ -3898,6 +3929,13 @@ static int tapan_codec_enable_slimrx(struct snd_soc_dapm_widget *w,
 			dev_dbg(codec->dev, "%s: Disconnect RX port, ret = %d\n",
 				 __func__, ret);
 		}
+		if ((core != NULL) &&
+		    (core->dev != NULL) &&
+		    (core->dev->parent != NULL)) {
+			pm_runtime_mark_last_busy(core->dev->parent);
+			pm_runtime_put(core->dev->parent);
+			dev_dbg(codec->dev, "%s: unvote requested", __func__);
+		}
 		break;
 	}
 	return ret;
@@ -3944,6 +3982,13 @@ static int tapan_codec_enable_slimtx(struct snd_soc_dapm_widget *w,
 						      dai->grph);
 			dev_dbg(codec->dev, "%s: Disconnect RX port, ret = %d\n",
 				 __func__, ret);
+		}
+		if ((core != NULL) &&
+		    (core->dev != NULL) &&
+		    (core->dev->parent != NULL)) {
+			pm_runtime_mark_last_busy(core->dev->parent);
+			pm_runtime_put(core->dev->parent);
+			dev_dbg(codec->dev, "%s: unvote requested", __func__);
 		}
 		break;
 	}
@@ -5339,7 +5384,9 @@ static int tapan_device_down(struct wcd9xxx *wcd9xxx)
 static int tapan_post_reset_cb(struct wcd9xxx *wcd9xxx)
 {
 	int ret = 0;
+#ifndef CONFIG_SND_SOC_TPA6165A2
 	int rco_clk_rate;
+#endif
 	struct snd_soc_codec *codec;
 	struct tapan_priv *tapan;
 
@@ -5375,6 +5422,7 @@ static int tapan_post_reset_cb(struct wcd9xxx *wcd9xxx)
 
 	wcd9xxx_resmgr_post_ssr(&tapan->resmgr);
 
+#ifndef CONFIG_SND_SOC_TPA6165A2
 	wcd9xxx_mbhc_deinit(&tapan->mbhc);
 
 	if (TAPAN_IS_1_0(wcd9xxx->version))
@@ -5397,6 +5445,7 @@ static int tapan_post_reset_cb(struct wcd9xxx *wcd9xxx)
 
 	tapan->machine_codec_event_cb(codec, WCD9XXX_CODEC_EVENT_CODEC_UP);
 
+#endif
 	mutex_unlock(&codec->mutex);
 	return ret;
 }
@@ -5588,6 +5637,7 @@ static int tapan_codec_probe(struct snd_soc_codec *codec)
 	else
 		rco_clk_rate = TAPAN_MCLK_CLK_9P6MHZ;
 
+#ifndef CONFIG_SND_SOC_TPA6165A2
 	ret = wcd9xxx_mbhc_init(&tapan->mbhc, &tapan->resmgr, codec, NULL,
 				&mbhc_cb, rco_clk_rate,
 				TAPAN_CDC_ZDET_SUPPORTED);
@@ -5596,6 +5646,7 @@ static int tapan_codec_probe(struct snd_soc_codec *codec)
 		pr_err("%s: mbhc init failed %d\n", __func__, ret);
 		return ret;
 	}
+#endif
 
 	tapan->codec = codec;
 	for (i = 0; i < COMPANDER_MAX; i++) {
@@ -5709,8 +5760,10 @@ static int tapan_codec_remove(struct snd_soc_codec *codec)
 
 	tapan_cleanup_irqs(tapan);
 
+#ifndef CONFIG_SND_SOC_TPA6165A2
 	/* cleanup MBHC */
 	wcd9xxx_mbhc_deinit(&tapan->mbhc);
+#endif
 	/* cleanup resmgr */
 	wcd9xxx_resmgr_deinit(&tapan->resmgr);
 

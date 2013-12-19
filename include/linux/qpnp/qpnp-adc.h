@@ -615,6 +615,21 @@ enum qpnp_adc_tm_channel_select	{
 	QPNP_ADC_TM_CH_SELECT_NONE
 };
 
+/**
+ * Channel index for the corresponding index to qpnp_adc_tm_channel_selec
+ */
+enum qpnp_adc_tm_channel_num {
+	QPNP_ADC_TM_CHAN0 = 0,
+	QPNP_ADC_TM_CHAN1,
+	QPNP_ADC_TM_CHAN2,
+	QPNP_ADC_TM_CHAN3,
+	QPNP_ADC_TM_CHAN4,
+	QPNP_ADC_TM_CHAN5,
+	QPNP_ADC_TM_CHAN6,
+	QPNP_ADC_TM_CHAN7,
+	QPNP_ADC_TM_CHAN_NONE
+};
+
 enum qpnp_comp_scheme_type {
 	COMP_ID_GF = 0,
 	COMP_ID_SMIC,
@@ -787,11 +802,13 @@ struct qpnp_vadc_scaling_ratio {
  * @adc_reference: Reference voltage for QPNP ADC.
  * @bitresolution: ADC bit resolution for QPNP ADC.
  * @biploar: Polarity for QPNP ADC.
+ * @batt_therm_type: Which Battery Thermistor map to use.
  */
 struct qpnp_adc_properties {
 	uint32_t	adc_vdd_reference;
 	uint32_t	bitresolution;
 	bool		bipolar;
+	uint32_t	batt_therm_type;
 };
 
 /**
@@ -1024,6 +1041,11 @@ int32_t qpnp_vadc_conv_seq_request(struct qpnp_vadc_chip *dev,
  * @data:	Data used for verifying the range of the ADC code.
  */
 int32_t qpnp_vadc_check_result(int32_t *data);
+
+/**
+ * qpnp_vadc_get_batt_therm_type() - Returns batt therm type.
+ */
+int32_t qpnp_vadc_get_batt_therm_type(struct qpnp_vadc_chip *qpnp_vadc);
 
 /**
  * qpnp_adc_get_devicetree_data() - Abstracts the ADC devicetree data.
@@ -1274,6 +1296,10 @@ int32_t qpnp_adc_tm_scale_therm_voltage_pu2(struct qpnp_vadc_chip *dev,
  */
 int32_t qpnp_adc_tm_scale_voltage_therm_pu2(struct qpnp_vadc_chip *dev,
 				uint32_t reg, int64_t *result);
+/**
+ * qpnp_adc_tm_get_batt_therm_type() - Returns batt therm type.
+ */
+int32_t qpnp_adc_tm_get_batt_therm_type(void);
 /**
  * qpnp_adc_usb_scaler() - Performs reverse calibration on the low/high
  *		voltage threshold values passed by the client.

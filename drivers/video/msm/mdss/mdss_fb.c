@@ -242,28 +242,12 @@ static ssize_t mdss_fb_get_split(struct device *dev,
 	return ret;
 }
 
-static ssize_t mdss_mdp_show_blank_event(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct fb_info *fbi = dev_get_drvdata(dev);
-	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
-	int ret;
-
-	pr_debug("fb%d panel_power_on = %d\n", mfd->index, mfd->panel_power_on);
-	ret = scnprintf(buf, PAGE_SIZE, "panel_power_on = %d\n",
-						mfd->panel_power_on);
-
-	return ret;
-}
-
 static DEVICE_ATTR(msm_fb_type, S_IRUGO, mdss_fb_get_type, NULL);
 static DEVICE_ATTR(msm_fb_split, S_IRUGO, mdss_fb_get_split, NULL);
-static DEVICE_ATTR(show_blank_event, S_IRUGO, mdss_mdp_show_blank_event, NULL);
 
 static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_msm_fb_type.attr,
 	&dev_attr_msm_fb_split.attr,
-	&dev_attr_show_blank_event.attr,
 	NULL,
 };
 
@@ -329,7 +313,6 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	mfd->index = fbi_list_index;
 	mfd->mdp_fb_page_protection = MDP_FB_PAGE_PROTECTION_WRITECOMBINE;
 
-	mfd->ext_ad_ctrl = -1;
 	mfd->bl_level = 0;
 	mfd->bl_scale = 1024;
 	mfd->bl_min_lvl = 30;
@@ -339,7 +322,6 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	if (pdata->next)
 		mfd->split_display = true;
 	mfd->mdp = *mdp_instance;
-	INIT_LIST_HEAD(&mfd->proc_list);
 
 	mutex_init(&mfd->lock);
 	mutex_init(&mfd->bl_lock);
@@ -1116,31 +1098,13 @@ static int mdss_fb_register(struct msm_fb_data_type *mfd)
 static int mdss_fb_open(struct fb_info *info, int user)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
-	struct mdss_fb_proc_info *pinfo = NULL;
 	int result;
-	int pid = current->tgid;
-
-	list_for_each_entry(pinfo, &mfd->proc_list, list) {
-		if (pinfo->pid == pid)
-			break;
-	}
-
-	if ((pinfo == NULL) || (pinfo->pid != pid)) {
-		pinfo = kmalloc(sizeof(*pinfo), GFP_KERNEL);
-		if (!pinfo) {
-			pr_err("unable to alloc process info\n");
-			return -ENOMEM;
-		}
-		pinfo->pid = pid;
-		pinfo->ref_cnt = 0;
-		list_add(&pinfo->list, &mfd->proc_list);
-		pr_debug("new process entry pid=%d\n", pinfo->pid);
-	}
 
 	result = pm_runtime_get_sync(info->dev);
 
 	if (result < 0)
 		pr_err("pm_runtime: fail to wake up\n");
+
 
 	if (!mfd->ref_cnt) {
 		result = mdss_fb_blank_sub(FB_BLANK_UNBLANK, info,
@@ -1153,7 +1117,6 @@ static int mdss_fb_open(struct fb_info *info, int user)
 		}
 	}
 
-	pinfo->ref_cnt++;
 	mfd->ref_cnt++;
 	return 0;
 }
@@ -1161,9 +1124,7 @@ static int mdss_fb_open(struct fb_info *info, int user)
 static int mdss_fb_release(struct fb_info *info, int user)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
-	struct mdss_fb_proc_info *pinfo = NULL;
 	int ret = 0;
-	int pid = current->tgid;
 
 	if (!mfd->ref_cnt) {
 		pr_info("try to close unopened fb %d!\n", mfd->index);
@@ -1172,31 +1133,6 @@ static int mdss_fb_release(struct fb_info *info, int user)
 
 	mdss_fb_pan_idle(mfd);
 	mfd->ref_cnt--;
-
-	list_for_each_entry(pinfo, &mfd->proc_list, list) {
-		if (pinfo->pid == pid)
-			break;
-	}
-
-	if (!pinfo || (pinfo->pid != pid)) {
-		pr_warn("unable to find process info for fb%d pid=%d\n",
-				mfd->index, pid);
-	} else {
-		pr_debug("found process entry pid=%d ref=%d\n",
-				pinfo->pid, pinfo->ref_cnt);
-
-		pinfo->ref_cnt--;
-		if (pinfo->ref_cnt == 0) {
-			if (mfd->mdp.release_fnc) {
-				ret = mfd->mdp.release_fnc(mfd);
-				if (ret)
-					pr_err("error releasing fb%d pid=%d\n",
-						mfd->index, pinfo->pid);
-			}
-			list_del(&pinfo->list);
-			kfree(pinfo);
-		}
-	}
 
 	if (!mfd->ref_cnt) {
 		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, info,
@@ -1702,7 +1638,7 @@ static int mdss_fb_set_lut(struct fb_info *info, void __user *p)
 static int mdss_fb_handle_buf_sync_ioctl(struct msm_fb_data_type *mfd,
 						struct mdp_buf_sync *buf_sync)
 {
-	int i, fence_cnt = 0, ret = 0;
+	int i, ret = 0;
 	int acq_fen_fd[MDP_MAX_FENCE_FD];
 	struct sync_fence *fence;
 	u32 threshold;
@@ -1732,10 +1668,10 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_fb_data_type *mfd,
 		}
 		mfd->acq_fen[i] = fence;
 	}
-	fence_cnt = i;
+	mfd->acq_fen_cnt = i;
 	if (ret)
 		goto buf_sync_err_1;
-	mfd->acq_fen_cnt = fence_cnt;
+
 	if (buf_sync->flags & MDP_BUF_SYNC_FLAG_WAIT)
 		mdss_fb_wait_for_fence(mfd);
 
@@ -1784,7 +1720,7 @@ buf_sync_err_2:
 	mfd->cur_rel_fence = NULL;
 	mfd->cur_rel_fen_fd = 0;
 buf_sync_err_1:
-	for (i = 0; i < fence_cnt; i++)
+	for (i = 0; i < mfd->acq_fen_cnt; i++)
 		sync_fence_put(mfd->acq_fen[i]);
 	mfd->acq_fen_cnt = 0;
 	mutex_unlock(&mfd->sync_mutex);

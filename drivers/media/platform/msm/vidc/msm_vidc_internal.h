@@ -178,6 +178,7 @@ struct msm_vidc_core_capability {
 	struct hal_capability_supported height;
 	struct hal_capability_supported frame_rate;
 	u32 capability_set;
+	u32 limited_size;
 };
 
 struct msm_vidc_core {

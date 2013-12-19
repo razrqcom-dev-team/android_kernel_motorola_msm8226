@@ -19,6 +19,7 @@
 #include <linux/of_device.h>
 #include <linux/delay.h>
 #include <linux/of_coresight.h>
+#include <linux/dropbox.h>
 
 #include <mach/socinfo.h>
 #include <mach/msm_bus_board.h>
@@ -122,6 +123,9 @@ static struct adreno_device device_3d0 = {
 	.long_ib_detect = 1,
 };
 
+char kgsl_ft_report[KGSL_FT_REPORT_LEN];
+int kgsl_ft_report_pos;
+
 /* This set of registers are used for Hang detection
  * If the values of these registers are same after
  * KGSL_TIMEOUT_PART time, GPU hang is reported in
@@ -129,6 +133,10 @@ static struct adreno_device device_3d0 = {
  */
 
 unsigned int ft_detect_regs[FT_DETECT_REGS_COUNT];
+
+static void adreno_hang_panic_work_func(struct work_struct *work);
+static struct delayed_work adreno_hang_panic_work;
+static struct kgsl_device *adreno_hang_panic_device;
 
 /*
  * This is the master list of all GPU cores that are supported by this
@@ -1598,6 +1606,8 @@ adreno_probe(struct platform_device *pdev)
 	kgsl_pwrscale_init(device);
 	kgsl_pwrscale_attach_policy(device, ADRENO_DEFAULT_PWRSCALE_POLICY);
 
+	INIT_DELAYED_WORK(&adreno_hang_panic_work, adreno_hang_panic_work_func);
+
 	device->flags &= ~KGSL_FLAGS_SOFT_RESET;
 	pdata = kgsl_device_get_drvdata(device);
 
@@ -2710,6 +2720,9 @@ adreno_dump_and_exec_ft(struct kgsl_device *device)
 			* will work as it always has
 			*/
 			kgsl_device_snapshot(device, 1);
+
+			dropbox_queue_event_binary("gpu_snapshot",
+				device->snapshot, device->snapshot_size);
 		}
 
 		result = adreno_ft(device, &ft_data);
@@ -2720,6 +2733,9 @@ adreno_dump_and_exec_ft(struct kgsl_device *device)
 
 		if (result) {
 			kgsl_pwrctrl_set_state(device, KGSL_STATE_HUNG);
+			adreno_hang_panic_device = device;
+			schedule_delayed_work(&adreno_hang_panic_work,
+				msecs_to_jiffies(10000));
 		} else {
 			kgsl_pwrctrl_set_state(device, KGSL_STATE_ACTIVE);
 			mod_timer(&device->hang_timer,
@@ -2727,6 +2743,8 @@ adreno_dump_and_exec_ft(struct kgsl_device *device)
 				msecs_to_jiffies(KGSL_TIMEOUT_PART)));
 		}
 		complete_all(&device->ft_gate);
+		dropbox_queue_event_text("gpu_ft_report", kgsl_ft_report,
+			kgsl_ft_report_pos);
 	}
 done:
 	return result;
@@ -2989,6 +3007,13 @@ int adreno_ft_init_sysfs(struct kgsl_device *device)
 void adreno_ft_uninit_sysfs(struct kgsl_device *device)
 {
 	kgsl_remove_device_sysfs_files(device->dev, ft_attr_list);
+}
+
+static void adreno_hang_panic_work_func(struct work_struct *work)
+{
+	KGSL_DRV_ERR(adreno_hang_panic_device,
+		"Cannot recover GPU. Device will be restarted");
+	BUG();
 }
 
 static int adreno_getproperty(struct kgsl_device *device,
@@ -3669,6 +3694,8 @@ unsigned int adreno_ft_detect(struct kgsl_device *device,
 		}
 
 		if (fast_hang_detected) {
+			if (device->state != KGSL_STATE_DUMP_AND_FT)
+				kgsl_ft_report_pos = 0;
 			KGSL_FT_ERR(device,
 				"Proc %s, ctxt_id %d ts %d triggered fault tolerance"
 				" on global ts %d\n",
@@ -3693,6 +3720,9 @@ unsigned int adreno_ft_detect(struct kgsl_device *device,
 				(curr_context->ib_gpu_time_used >
 					KGSL_TIMEOUT_LONG_IB_DETECTION) &&
 				(adreno_dev->long_ib_ts != curr_global_ts)) {
+						if (device->state !=
+							KGSL_STATE_DUMP_AND_FT)
+							kgsl_ft_report_pos = 0;
 						KGSL_FT_ERR(device,
 						"Proc %s, ctxt_id %d ts %d"
 						"used GPU for %d ms long ib "

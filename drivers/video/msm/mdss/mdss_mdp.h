@@ -116,7 +116,6 @@ typedef void (*mdp_vsync_handler_t)(struct mdss_mdp_ctl *, ktime_t);
 
 struct mdss_mdp_vsync_handler {
 	bool enabled;
-	bool cmd_post_flush;
 	mdp_vsync_handler_t vsync_handler;
 	struct list_head list;
 };
@@ -175,6 +174,7 @@ struct mdss_mdp_ctl {
 					struct mdss_mdp_vsync_handler *);
 	int (*remove_vsync_handler) (struct mdss_mdp_ctl *,
 					struct mdss_mdp_vsync_handler *);
+	void (*ctx_dump_fnc) (struct mdss_mdp_ctl *ctl);
 
 	void *priv_data;
 	u32 wb_type;
@@ -273,7 +273,6 @@ struct mdss_ad_info {
 	struct mutex lock;
 	struct work_struct calc_work;
 	struct msm_fb_data_type *mfd;
-	struct msm_fb_data_type *bl_mfd;
 	struct mdss_mdp_vsync_handler handle;
 	struct completion comp;
 	u32 last_str;
@@ -318,7 +317,6 @@ struct mdss_mdp_pipe {
 	u32 ftch_id;
 	atomic_t ref_cnt;
 	u32 play_cnt;
-	int pid;
 
 	u32 flags;
 	u32 bwc_mode;
@@ -381,12 +379,10 @@ struct mdss_overlay_private {
 	struct list_head overlay_list;
 	struct list_head pipes_used;
 	struct list_head pipes_cleanup;
-	struct list_head rot_proc_list;
 	bool mixer_swap;
 
 	struct mdss_mdp_data free_list[MAX_FREE_LIST_SIZE];
 	int free_list_size;
-	int ad_state;
 };
 
 struct mdss_mdp_perf_params {
@@ -447,6 +443,8 @@ int mdss_mdp_video_start(struct mdss_mdp_ctl *ctl);
 int mdss_mdp_cmd_start(struct mdss_mdp_ctl *ctl);
 int mdss_mdp_writeback_start(struct mdss_mdp_ctl *ctl);
 int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd);
+void mdss_mdp_video_lock_panel(struct mdss_mdp_ctl *ctl);
+void mdss_mdp_video_unlock_panel(struct mdss_mdp_ctl *ctl);
 
 struct mdss_mdp_ctl *mdss_mdp_ctl_init(struct mdss_panel_data *pdata,
 					struct msm_fb_data_type *mfd);
@@ -463,7 +461,7 @@ int mdss_mdp_ctl_start(struct mdss_mdp_ctl *ctl);
 int mdss_mdp_ctl_stop(struct mdss_mdp_ctl *ctl);
 int mdss_mdp_ctl_intf_event(struct mdss_mdp_ctl *ctl, int event, void *arg);
 int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
-		struct mdss_mdp_perf_params *perf);
+		struct mdss_mdp_perf_params *perf, int tune);
 
 struct mdss_mdp_mixer *mdss_mdp_wb_mixer_alloc(int rotator);
 int mdss_mdp_wb_mixer_destroy(struct mdss_mdp_mixer *mixer);
@@ -574,6 +572,7 @@ int mdss_mdp_calc_phase_step(u32 src, u32 dst, u32 *out_phase);
 
 int mdss_mdp_wb_kickoff(struct msm_fb_data_type *mfd);
 int mdss_mdp_wb_ioctl_handler(struct msm_fb_data_type *mfd, u32 cmd, void *arg);
+int mdss_dsi_ioctl_handler(struct mdss_panel_data *pdata, u32 cmd, void *arg);
 
 int mdss_mdp_get_ctl_mixers(u32 fb_num, u32 *mixer_id);
 u32 mdss_mdp_fb_stride(u32 fb_index, u32 xres, int bpp);

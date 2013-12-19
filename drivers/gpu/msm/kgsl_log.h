@@ -13,8 +13,6 @@
 #ifndef __KGSL_LOG_H
 #define __KGSL_LOG_H
 
-extern unsigned int kgsl_cff_dump_enable;
-
 #define KGSL_LOG_INFO(dev, lvl, fmt, args...) \
 	do { \
 		if ((lvl) >= 6)  \
@@ -103,14 +101,30 @@ KGSL_LOG_ERR(_dev->dev, _dev->pwr_log, fmt, ##args)
 #define KGSL_PWR_CRIT(_dev, fmt, args...) \
 KGSL_LOG_CRIT(_dev->dev, _dev->pwr_log, fmt, ##args)
 
+#define KGSL_FT_REPORT_LEN 512
+extern char kgsl_ft_report[KGSL_FT_REPORT_LEN];
+extern int kgsl_ft_report_pos;
+
+#define KGSL_FT_REPORT(fmt, args...) \
+	(kgsl_ft_report_pos += scnprintf( \
+			&kgsl_ft_report[kgsl_ft_report_pos], \
+			KGSL_FT_REPORT_LEN - kgsl_ft_report_pos, \
+			fmt, ##args))
+
 #define KGSL_FT_INFO(_dev, fmt, args...) \
 KGSL_LOG_INFO(_dev->dev, _dev->ft_log, fmt, ##args)
 #define KGSL_FT_WARN(_dev, fmt, args...) \
 KGSL_LOG_WARN(_dev->dev, _dev->ft_log, fmt, ##args)
 #define KGSL_FT_ERR(_dev, fmt, args...) \
-KGSL_LOG_ERR(_dev->dev, _dev->ft_log, fmt, ##args)
+	do { \
+		KGSL_LOG_ERR(_dev->dev, _dev->ft_log, fmt, ##args); \
+		KGSL_FT_REPORT(fmt, ##args); \
+	} while (0)
 #define KGSL_FT_CRIT(_dev, fmt, args...) \
-KGSL_LOG_CRIT(_dev->dev, _dev->ft_log, fmt, ##args)
+	do { \
+		KGSL_LOG_CRIT(_dev->dev, _dev->ft_log, fmt, ##args); \
+		KGSL_FT_REPORT(fmt, ##args); \
+	} while (0)
 
 /* Core error messages - these are for core KGSL functions that have
    no device associated with them (such as memory) */

@@ -44,6 +44,8 @@ snd-soc-tlv320aic26-objs := tlv320aic26.o
 snd-soc-tlv320aic3x-objs := tlv320aic3x.o
 snd-soc-tlv320aic32x4-objs := tlv320aic32x4.o
 snd-soc-tlv320dac33-objs := tlv320dac33.o
+snd-soc-tlv320aic3253-objs := tlv320aic3253-tables.o tlv320aic3253.o
+snd-soc-tfa9890-objs := tfa9890.o
 snd-soc-twl4030-objs := twl4030.o
 snd-soc-twl6040-objs := twl6040.o
 snd-soc-uda134x-objs := uda134x.o
@@ -109,6 +111,8 @@ obj-$(CONFIG_SND_SOC_MSM_HDMI_CODEC_RX) := msm_hdmi_codec_rx.o
 # Amp
 snd-soc-max9877-objs := max9877.o
 snd-soc-tpa6130a2-objs := tpa6130a2.o
+snd-soc-tas2552-objs := tas2552.o
+snd-soc-tpa6165a2-objs := tpa6165a2.o
 
 obj-$(CONFIG_SND_SOC_88PM860X)	+= snd-soc-88pm860x.o
 obj-$(CONFIG_SND_SOC_AC97_CODEC)	+= snd-soc-ac97.o
@@ -214,7 +218,11 @@ obj-$(CONFIG_SND_SOC_WM9712)	+= snd-soc-wm9712.o
 obj-$(CONFIG_SND_SOC_WM9713)	+= snd-soc-wm9713.o
 obj-$(CONFIG_SND_SOC_WM_HUBS)	+= snd-soc-wm-hubs.o
 obj-$(CONFIG_SND_SOC_MSM_STUB)  += snd-soc-msm-stub.o
+obj-$(CONFIG_SND_SOC_TLV320AIC3253) += snd-soc-tlv320aic3253.o
+obj-$(CONFIG_SND_SOC_TFA9890) += snd-soc-tfa9890.o
 
 # Amp
 obj-$(CONFIG_SND_SOC_MAX9877)	+= snd-soc-max9877.o
 obj-$(CONFIG_SND_SOC_TPA6130A2)	+= snd-soc-tpa6130a2.o
+obj-$(CONFIG_SND_SOC_TAS2552)   += snd-soc-tas2552.o
+obj-$(CONFIG_SND_SOC_TPA6165A2) += snd-soc-tpa6165a2.o

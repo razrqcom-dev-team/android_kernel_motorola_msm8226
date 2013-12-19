@@ -637,6 +637,7 @@ static unsigned int msm_poll(struct file *f,
 int msm_post_event(struct v4l2_event *event, int timeout)
 {
 	int rc = 0;
+	uint8_t wait_count;
 	struct video_device *vdev;
 	struct msm_session *session;
 	struct msm_v4l2_event_data *event_data =
@@ -680,16 +681,25 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 	}
 
 	/* should wait on session based condition */
-	rc = wait_event_interruptible_timeout(cmd_ack->wait,
-		!list_empty_careful(&cmd_ack->command_q.list),
-		msecs_to_jiffies(timeout));
+	wait_count = 2;
+	do {
+		rc = wait_event_interruptible_timeout(cmd_ack->wait,
+			!list_empty_careful(&cmd_ack->command_q.list),
+			msecs_to_jiffies(timeout));
+		wait_count--;
+		if (rc != -ERESTARTSYS)
+			break;
+	} while (wait_count > 0);
+
 	if (list_empty_careful(&cmd_ack->command_q.list)) {
 		if (!rc) {
-			pr_err("%s: Timed out\n", __func__);
+			pr_err("%s: Timed out for cmd = %d\n", __func__,
+				event_data->command);
 			rc = -ETIMEDOUT;
 		}
 		if (rc < 0) {
-			pr_err("%s: rc = %d\n", __func__, rc);
+			pr_err("%s: Failed for cmd = %d, rc = %d\n", __func__,
+				event_data->command, rc);
 			mutex_unlock(&session->lock);
 			return rc;
 		}

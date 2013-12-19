@@ -1,3 +1,10 @@
+ifdef CONFIG_FUNCTION_TRACER
+CFLAGS_REMOVE_timer.o = -pg
+CFLAGS_REMOVE_clock.o = -pg
+CFLAGS_REMOVE_acpuclock.o = -pg
+CFLAGS_REMOVE_scm.o = -pg
+endif
+
 CFLAGS_scm.o :=$(call as-instr,.arch_extension sec,-DREQUIRES_SEC=1)
 
 obj-y += io.o dma.o memory.o
@@ -432,4 +439,9 @@ obj-$(CONFIG_CPU_FREQ_MSM) += cpufreq.o
 
 obj-$(CONFIG_WALL_CLK) += wallclk.o
 obj-$(CONFIG_WALL_CLK_SYSFS) += wallclk_sysfs.o
+obj-$(CONFIG_HAS_MACH_MEMUTILS) += memutils/
 obj-$(CONFIG_ARCH_RANDOM) += early_random.o
+obj-$(CONFIG_MMI_RAM_INFO) += mmi-ram-info.o
+obj-$(CONFIG_MMI_UNIT_INFO) += mmi-unit-info.o
+obj-$(CONFIG_MMI_SOC_INFO) += mmi_soc_info.o
+obj-$(CONFIG_MMI_MSM_PINMUX) += mmi-pinmux.o

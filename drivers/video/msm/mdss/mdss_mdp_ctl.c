@@ -181,7 +181,7 @@ static int mdss_mdp_ctl_perf_commit(struct mdss_data_type *mdata, u32 flags)
  * (MDP clock requirement) based on frame size and scaling requirements.
  */
 int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
-		struct mdss_mdp_perf_params *perf)
+		struct mdss_mdp_perf_params *perf, int tune)
 {
 	struct mdss_mdp_mixer *mixer;
 	int fps = DEFAULT_FRAME_RATE;
@@ -198,7 +198,8 @@ int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 
 		pinfo = &mixer->ctl->panel_data->panel_info;
 		fps = mdss_panel_get_framerate(pinfo);
-		v_total = mdss_panel_get_vtotal(pinfo);
+		v_total = mdss_panel_get_vtotal_lcd(pinfo,
+			tune ? &pinfo->lcdc_tune : &pinfo->lcdc);
 	} else {
 		v_total = mixer->height;
 	}
@@ -212,7 +213,14 @@ int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 
 	quota = fps * pipe->src.w * src_h;
 	if (pipe->src_fmt->chroma_sample == MDSS_MDP_CHROMA_420)
-		quota = (quota * 3) / 2;
+		/*
+		 * with decimation, chroma is not downsampled, this means we
+		 * need to allocate bw for extra lines that will be fetched
+		 */
+		if (pipe->vert_deci)
+			quota *= 2;
+		else
+			quota = (quota * 3) / 2;
 	else
 		quota *= pipe->src_fmt->bpp;
 
@@ -281,7 +289,7 @@ static void mdss_mdp_perf_mixer_update(struct mdss_mdp_mixer *mixer,
 		if (pipe == NULL)
 			continue;
 
-		if (mdss_mdp_perf_calc_pipe(pipe, &perf))
+		if (mdss_mdp_perf_calc_pipe(pipe, &perf, 0))
 			continue;
 
 		ab_total += perf.ab_quota >> MDSS_MDP_BUS_FACTOR_SHIFT;
@@ -420,7 +428,6 @@ static int mdss_mdp_ctl_free(struct mdss_mdp_ctl *ctl)
 	ctl->read_line_cnt_fnc = NULL;
 	ctl->add_vsync_handler = NULL;
 	ctl->remove_vsync_handler = NULL;
-	ctl->panel_data = NULL;
 	mutex_unlock(&mdss_mdp_ctl_lock);
 
 	return 0;
@@ -429,7 +436,7 @@ static int mdss_mdp_ctl_free(struct mdss_mdp_ctl *ctl)
 static struct mdss_mdp_mixer *mdss_mdp_mixer_alloc(
 		struct mdss_mdp_ctl *ctl, u32 type, int mux)
 {
-	struct mdss_mdp_mixer *mixer = NULL, *alt_mixer = NULL;
+	struct mdss_mdp_mixer *mixer = NULL;
 	u32 nmixers_intf;
 	u32 nmixers_wb;
 	u32 i;
@@ -447,16 +454,6 @@ static struct mdss_mdp_mixer *mdss_mdp_mixer_alloc(
 	case MDSS_MDP_MIXER_TYPE_INTF:
 		mixer_pool = ctl->mdata->mixer_intf;
 		nmixers = nmixers_intf;
-
-		/*
-		 * try to reserve first layer mixer for write back if
-		 * assertive display needs to be supported through wfd
-		 */
-		if (ctl->mdata->has_wb_ad && ctl->intf_num) {
-			alt_mixer = mixer_pool;
-			mixer_pool++;
-			nmixers--;
-		}
 		break;
 
 	case MDSS_MDP_MIXER_TYPE_WRITEBACK:
@@ -495,9 +492,6 @@ static struct mdss_mdp_mixer *mdss_mdp_mixer_alloc(
 		}
 		mixer = NULL;
 	}
-
-	if (!mixer && alt_mixer && (alt_mixer->ref_cnt == 0))
-		mixer = alt_mixer;
 	mutex_unlock(&mdss_mdp_ctl_lock);
 
 	return mixer;
