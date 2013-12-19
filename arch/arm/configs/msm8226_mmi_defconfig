@@ -1506,6 +1506,18 @@ CONFIG_WCNSS_MEM_PRE_ALLOC=y
 # CONFIG_MWIFIEX is not set
 
 #
+# Qualcomm Atheros Prima WLAN module
+#
+# CONFIG_PRIMA_WLAN is not set
+CONFIG_PRONTO_WLAN=m
+# CONFIG_PRIMA_WLAN_BTAMP is not set
+CONFIG_PRIMA_WLAN_LFR=y
+CONFIG_PRIMA_WLAN_OKC=y
+CONFIG_PRIMA_WLAN_11AC_HIGH_TP=y
+CONFIG_WLAN_FEATURE_11W=y
+CONFIG_QCOM_VOWIFI_11R=y
+
+#
 # Enable WiMAX (Networking options) to see the WiMAX drivers
 #
 # CONFIG_WAN is not set
