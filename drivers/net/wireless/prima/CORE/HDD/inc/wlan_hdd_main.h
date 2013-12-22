@@ -115,6 +115,7 @@
 #define WLAN_WAIT_TIME_DISCONNECT  500
 #define WLAN_WAIT_TIME_STATS       800
 #define WLAN_WAIT_TIME_POWER       800
+#define WLAN_WAIT_TIME_COUNTRY     1000
 /* Amount of time to wait for sme close session callback.
    This value should be larger than the timeout used by WDI to wait for
    a response from WCNSS */
@@ -135,8 +136,13 @@
 
 /** Maximum time(ms) to wait for tdls initiator to start direct communication **/
 #define WAIT_TIME_TDLS_INITIATOR    600
-/* Maximum time to get crda entry settings */
+
+/* Maximum time to get linux regulatory entry settings */
+#ifdef CONFIG_ENABLE_LINUX_REG
+#define LINUX_REG_WAIT_TIME 300
+#else
 #define CRDA_WAIT_TIME 300
+#endif
 
 /* Scan Req Timeout */
 #define WLAN_WAIT_TIME_SCAN_REQ 100
@@ -174,6 +180,9 @@
 #ifdef WLAN_FEATURE_11W
 #define WLAN_HDD_SA_QUERY_ACTION_FRAME 8
 #endif
+#define WLAN_HDD_CHANNEL_IN_UNII_1_BAND(center_freq) \
+(((center_freq) == 5180 ) || ((center_freq) == 5200) \
+|| ((center_freq) == 5220) || ((center_freq) == 5240))
 
 #define WLAN_HDD_PUBLIC_ACTION_TDLS_DISC_RESP 14
 #define WLAN_HDD_TDLS_ACTION_FRAME 12
@@ -193,9 +202,39 @@
 #define GTK_OFFLOAD_DISABLE 1
 #endif
 
+#ifdef FEATURE_WLAN_SCAN_PNO
+#define HDD_PNO_SCAN_TIMERS_SET_ONE      1
+/* value should not be greater than PNO_MAX_SCAN_TIMERS */
+#define HDD_PNO_SCAN_TIMERS_SET_MULTIPLE 6
+#endif
+
 #define HDD_MAC_ADDR_LEN    6
 #define HDD_ROAM_SCAN_CHANNEL_SWITCH_TIME 3
 typedef v_U8_t tWlanHddMacAddr[HDD_MAC_ADDR_LEN];
+
+struct statsContext
+{
+   struct completion completion;
+   hdd_adapter_t *pAdapter;
+   unsigned int magic;
+};
+
+#define STATS_CONTEXT_MAGIC 0x53544154   //STAT
+
+#ifdef FEATURE_WLAN_BATCH_SCAN
+#define HDD_BATCH_SCAN_VERSION (17)
+#define HDD_SET_BATCH_SCAN_DEFAULT_FREQ (30)/*batch scan frequency default 30s*/
+#define HDD_SET_BATCH_SCAN_BEST_NETWORK (16)/*best network default value*/
+#define HDD_SET_BATCH_SCAN_DEFAULT_BAND (0)/*auto means both 2.4GHz and 5GHz*/
+#define HDD_SET_BATCH_SCAN_24GHz_BAND_ONLY (1)/*only 2.4GHz band*/
+#define HDD_SET_BATCH_SCAN_5GHz_BAND_ONLY (2)/*only 5GHz band*/
+#define HDD_SET_BATCH_SCAN_REQ_TIME_OUT (15000) /*Batch scan req timeout in ms*/
+#define HDD_GET_BATCH_SCAN_RSP_TIME_OUT (15000) /*Batch scan req timeout in ms*/
+#define HDD_BATCH_SCAN_AP_META_INFO_SIZE (150) /*AP meta info size in string*/
+
+#define MIN(a, b) (a > b ? b : a)
+
+#endif
 
 typedef struct hdd_tx_rx_stats_s
 {
@@ -594,6 +633,9 @@ typedef struct {
    /**Track whether OS TX queue has been disabled.*/
    v_BOOL_t txSuspended[NUM_TX_QUEUES];
 
+   /**Track whether 3/4th of resources are used on softAP/P2P GO side. */
+   v_BOOL_t vosLowResource;
+
    /** Track QoS status of station */
    v_BOOL_t isQosEnabled;
 
@@ -663,6 +705,10 @@ typedef struct hdd_scaninfo_s
    /* The scan pending  */
    v_U32_t mScanPending;
 
+  /* Counter for mScanPending so that the scan pending
+     error log is not printed for more than 5 times    */
+   v_U32_t mScanPendingCounter;
+
    /* Client Wait Scan Result */
    v_U32_t waitScanResult;
 
@@ -692,8 +738,53 @@ typedef struct multicast_addr_list
    v_U8_t isFilterApplied;
    v_U8_t mc_cnt;
    v_U8_t addr[WLAN_HDD_MAX_MC_ADDR_LIST][ETH_ALEN];
-   v_U8_t filter_index[WLAN_HDD_MAX_MC_ADDR_LIST]; // IKJB42MAIN-1244, Motorola, a19091
 } t_multicast_add_list;
+#endif
+
+#ifdef FEATURE_WLAN_BATCH_SCAN
+
+/*Batch scan repsonse AP info*/
+typedef struct
+{
+    /*Batch ID*/
+    tANI_U32 batchId;
+    /*is it last AP in GET BATCH SCAN RSP*/
+    v_BOOL_t isLastAp;
+    /*BSSID*/
+    tANI_U8  bssid[SIR_MAC_ADDR_LEN];
+    /*SSID*/
+    tANI_U8  ssid[SIR_MAX_SSID_SIZE];
+    /*Channel*/
+    tANI_U8  ch;
+    /*RSSI or Level*/
+    tANI_U8  rssi;
+    /*Age*/
+    tANI_U32 age;
+}tHDDbatchScanRspApInfo;
+
+/*Batch scan response list*/
+struct tHDDBatchScanRspList
+{
+    tHDDbatchScanRspApInfo ApInfo;
+    struct tHDDBatchScanRspList *pNext;
+};
+
+typedef struct tHDDBatchScanRspList tHddBatchScanRsp;
+
+/*Batch Scan state*/
+typedef enum
+{
+   /*Batch scan is started this means WLS_BATCHING SET command is issued
+     from framework*/
+   eHDD_BATCH_SCAN_STATE_STARTED,
+
+   /*Batch scan is stopped this means WLS_BATCHING STOP command is issued
+     from framework*/
+   eHDD_BATCH_SCAN_STATE_STOPPED,
+
+   eHDD_BATCH_SCAN_STATE_MAX,
+} eHDD_BATCH_SCAN_STATE;
+
 #endif
 
 #define WLAN_HDD_ADAPTER_MAGIC 0x574c414e //ASCII "WLAN"
@@ -784,6 +875,9 @@ struct hdd_adapter_s
    hdd_list_t wmm_tx_queue[NUM_TX_QUEUES];
    /**Track whether VOS is in a low resource state*/
    v_BOOL_t isVosOutOfResource;
+
+   /**Track whether 3/4th of resources are used on STA/p2p client side */
+   v_BOOL_t isVosLowResource;
   
    /**Track whether OS TX queue has been disabled.*/
    v_BOOL_t isTxSuspended[NUM_TX_QUEUES];
@@ -825,13 +919,6 @@ struct hdd_adapter_s
    hdd_cfg80211_state_t cfg80211State;
 
 #ifdef WLAN_FEATURE_PACKET_FILTERING
-   // IKJB42MAIN-1244, Motorola, a19091 - START
-   v_U32_t user_filter_config;
-   v_U32_t driver_filter_config;
-   v_U8_t ipv6_user_set_map : 4;
-   v_U8_t ipv6_code_set_map : 4;
-   v_SCHAR_t filter_v6_index;
-   // IKJB42MAIN-1244, Motorola, a19091 - END
    t_multicast_add_list mc_addr_list;
 #endif
 
@@ -839,6 +926,43 @@ struct hdd_adapter_s
    v_U32_t magic;
    v_BOOL_t higherDtimTransition;
    v_BOOL_t survey_idx;
+#if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
+   tAniTrafStrmMetrics tsmStats;
+#endif
+
+#ifdef FEATURE_WLAN_BATCH_SCAN
+   /*Completion variable for set batch scan request*/
+   struct completion hdd_set_batch_scan_req_var;
+   /*Completion variable for get batch scan request*/
+   struct completion hdd_get_batch_scan_req_var;
+   /*HDD batch scan lock*/
+   struct mutex hdd_batch_scan_lock;
+   /*HDD set batch scan request*/
+   tSirSetBatchScanReq  hddSetBatchScanReq;
+   /*HDD set batch scan response*/
+   tSirSetBatchScanRsp  hddSetBatchScanRsp;
+   /*HDD stop batch scan indication*/
+   tSirStopBatchScanInd hddStopBatchScanInd;
+   /*HDD get batch scan request*/
+   tSirTriggerBatchScanResultInd  hddTriggerBatchScanResultInd;
+   /*Batched scan reponse queue: new batch scan results added at the tail
+    and old batch scan results are deleted from head*/
+   tHddBatchScanRsp *pBatchScanRsp;
+   /*No of scans in batch scan rsp(MSCAN)*/
+   v_U32_t numScanList;
+   /*isTruncated = 1 batch scan rsp is truncated
+     isTruncated = 0 batch scan rsp is complete*/
+   v_BOOL_t isTruncated;
+   /*Wait for get batch scan response from FW or not*/
+   volatile v_BOOL_t hdd_wait_for_get_batch_scan_rsp;
+   /*Wait for set batch scan response from FW or not*/
+   volatile v_BOOL_t hdd_wait_for_set_batch_scan_rsp;
+   /*Previous batch scan ID*/
+   v_U32_t prev_batch_id;
+   /*Batch scan state*/
+   eHDD_BATCH_SCAN_STATE batchScanState;
+#endif
+
 };
 
 #define WLAN_HDD_GET_STATION_CTX_PTR(pAdapter) (&(pAdapter)->sessionCtx.station)
@@ -911,11 +1035,6 @@ struct hdd_context_s
    /** Pointer for configuration data */
    const struct firmware *cfg;
    
-#ifdef WLAN_NV_OTA_UPGRADE
-   /** Pointer for nv data programmed by factory */
-   const struct firmware *nv_factory;
-#endif
-   
    /** Pointer for nv data */
    const struct firmware *nv;
    
@@ -945,8 +1064,12 @@ struct hdd_context_s
    /* Completion  variable to indicate Mc Thread Suspended */
    struct completion mc_sus_event_var;
 
-   /* Completion  variable to wlan_hdd_get_crda_regd_entry  */
+   /* Completion variable for regulatory hint  */
+#ifdef CONFIG_ENABLE_LINUX_REG
+   struct completion linux_reg_req;
+#else
    struct completion driver_crda_req;
+#endif
 
    v_BOOL_t isWlanSuspended;
 
@@ -1053,6 +1176,8 @@ struct hdd_context_s
     lphbEnableStruct  lphbEnableReq;
 #endif /* FEATURE_WLAN_LPHB */
 
+    v_BOOL_t sus_res_mcastbcast_filter_valid;
+
     /* debugfs entry */
     struct dentry *debugfs_phy;
 
@@ -1072,6 +1197,10 @@ struct hdd_context_s
     vos_timer_t    tx_rx_trafficTmr;
     v_U8_t         drvr_miracast;
     v_U8_t         issplitscan_enabled;
+
+    /* VHT80 allowed*/
+    v_BOOL_t isVHT80Allowed;
+
 };
 
 
@@ -1129,14 +1258,13 @@ v_BOOL_t hdd_is_suspend_notify_allowed(hdd_context_t* pHddCtx);
 void hdd_abort_mac_scan(hdd_context_t *pHddCtx);
 void wlan_hdd_set_monitor_tx_adapter( hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter );
 void hdd_cleanup_actionframe( hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter );
-v_BOOL_t is_crda_regulatory_entry_valid(void);
+
 void crda_regulatory_entry_default(v_U8_t *countryCode, int domain_id);
 void wlan_hdd_set_concurrency_mode(hdd_context_t *pHddCtx, tVOS_CON_MODE mode);
 void wlan_hdd_clear_concurrency_mode(hdd_context_t *pHddCtx, tVOS_CON_MODE mode);
 void wlan_hdd_reset_prob_rspies(hdd_adapter_t* pHostapdAdapter);
 void hdd_prevent_suspend(void);
 void hdd_allow_suspend(void);
-void hdd_prevent_suspend_after_scan(long hz); //Mot IKHSS7-28961 :Empty scan results
 void hdd_allow_suspend_timeout(v_U32_t timeout);
 bool hdd_is_ssr_required(void);
 void hdd_set_ssr_required(e_hdd_ssr_required value);
@@ -1144,6 +1272,7 @@ void hdd_set_ssr_required(e_hdd_ssr_required value);
 VOS_STATUS hdd_enable_bmps_imps(hdd_context_t *pHddCtx);
 VOS_STATUS hdd_disable_bmps_imps(hdd_context_t *pHddCtx, tANI_U8 session_type);
 
+void wlan_hdd_cfg80211_update_reg_info(struct wiphy *wiphy);
 VOS_STATUS wlan_hdd_restart_driver(hdd_context_t *pHddCtx);
 void hdd_exchange_version_and_caps(hdd_context_t *pHddCtx);
 void hdd_set_pwrparams(hdd_context_t *pHddCtx);
@@ -1152,5 +1281,8 @@ int wlan_hdd_validate_context(hdd_context_t *pHddCtx);
 VOS_STATUS hdd_issta_p2p_clientconnected(hdd_context_t *pHddCtx);
 #ifdef WLAN_FEATURE_PACKET_FILTERING
 int wlan_hdd_setIPv6Filter(hdd_context_t *pHddCtx, tANI_U8 filterType, tANI_U8 sessionId);
+#endif
+#ifdef CONFIG_ENABLE_LINUX_REG
+void hdd_checkandupdate_phymode( hdd_context_t *pHddCtx);
 #endif
 #endif    // end #if !defined( WLAN_HDD_MAIN_H )

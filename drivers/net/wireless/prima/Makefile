@@ -163,7 +163,9 @@ MAC_LIM_OBJS := $(MAC_SRC_DIR)/pe/lim/limAIDmgmt.o \
 		$(MAC_SRC_DIR)/pe/lim/limUtils.o
 
 ifeq ($(CONFIG_QCOM_CCX),y)
+ifneq ($(CONFIG_QCOM_CCX_UPLOAD),y)
 MAC_LIM_OBJS += $(MAC_SRC_DIR)/pe/lim/limProcessCcxFrame.o
+endif
 endif
 
 ifeq ($(CONFIG_QCOM_TDLS),y)
@@ -222,7 +224,9 @@ SME_CSR_OBJS := $(SME_SRC_DIR)/csr/csrApiRoam.o \
 		$(SME_SRC_DIR)/csr/csrUtil.o
 
 ifeq ($(CONFIG_QCOM_CCX),y)
+ifneq ($(CONFIG_QCOM_CCX_UPLOAD),y)
 SME_CSR_OBJS += $(SME_SRC_DIR)/csr/csrCcx.o
+endif
 endif
 
 ifeq ($(CONFIG_QCOM_TDLS),y)
@@ -301,10 +305,6 @@ SYS_OBJS :=	$(SYS_COMMON_SRC_DIR)/wlan_qct_sys.o \
 		$(SYS_LEGACY_SRC_DIR)/utils/src/parserApi.o \
 		$(SYS_LEGACY_SRC_DIR)/utils/src/utilsApi.o \
 		$(SYS_LEGACY_SRC_DIR)/utils/src/utilsParser.o
-
-ifeq ($(CONFIG_QCOM_CCX),y)
-SYS_OBJS += $(SYS_LEGACY_SRC_DIR)/utils/src/limCcxparserApi.o
-endif
 
 ############ TL ############
 TL_DIR :=	CORE/TL
@@ -488,8 +488,8 @@ CDEFINES :=	-DANI_BUS_TYPE_PLATFORM=1 \
 		-DWLAN_FEATURE_ROAM_SCAN_OFFLOAD \
 		-DWLAN_FEATURE_GTK_OFFLOAD \
 		-DWLAN_WAKEUP_EVENTS \
-                -DWLAN_NV_OTA_UPGRADE \
 	        -DWLAN_KD_READY_NOTIFIER \
+		-DFEATURE_WLAN_BATCH_SCAN \
 		-DFEATURE_WLAN_LPHB
 
 ifneq ($(CONFIG_PRONTO_WLAN),)
@@ -522,6 +522,9 @@ endif
 
 ifeq ($(CONFIG_QCOM_CCX),y)
 CDEFINES += -DFEATURE_WLAN_CCX
+ifeq ($(CONFIG_QCOM_CCX_UPLOAD),y)
+CDEFINES += -DFEATURE_WLAN_CCX_UPLOAD
+endif
 endif
 
 #normally, TDLS negative behavior is not needed
@@ -544,9 +547,6 @@ endif
 
 ifeq ($(CONFIG_PRIMA_WLAN_LFR),y)
 CDEFINES += -DFEATURE_WLAN_LFR
-#Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
-CDEFINES += -DFEATURE_WLAN_LFR_METRICS
-#End IKJB42MAIN-6385
 endif
 
 ifeq ($(CONFIG_PRIMA_WLAN_OKC),y)

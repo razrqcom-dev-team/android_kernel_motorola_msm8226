@@ -132,18 +132,12 @@ int wlan_hdd_cfg80211_pmksa_candidate_notify(
                     hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo,
                     int index, bool preauth );
 #endif
-//Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
-#ifdef FEATURE_WLAN_LFR_METRICS
-    eHalStatus wlan_hdd_cfg80211_roam_metrics_preauth(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo);
-    eHalStatus wlan_hdd_cfg80211_roam_metrics_preauth_status(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo,bool preauth_status);
-    eHalStatus wlan_hdd_cfg80211_roam_metrics_handover(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo);
-#endif
-//End fjdw67 Motorola, IKJB42MAIN-6385
+
 #ifdef FEATURE_WLAN_WAPI
 void wlan_hdd_cfg80211_set_key_wapi(hdd_adapter_t* pAdapter,
               u8 key_index, const u8 *mac_addr, u8 *key , int key_Len);
 #endif
-struct wiphy *wlan_hdd_cfg80211_init(int priv_size);
+struct wiphy *wlan_hdd_cfg80211_wiphy_alloc(int priv_size);
 
 int wlan_hdd_cfg80211_scan( struct wiphy *wiphy,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,6,0))
@@ -151,21 +145,30 @@ int wlan_hdd_cfg80211_scan( struct wiphy *wiphy,
 #endif
                             struct cfg80211_scan_request *request);
 
-int wlan_hdd_cfg80211_register(struct device *dev,
+int wlan_hdd_cfg80211_init(struct device *dev,
                                struct wiphy *wiphy,
                                hdd_config_t *pCfg
                                          );
 
+int wlan_hdd_cfg80211_register( struct wiphy *wiphy);
 void wlan_hdd_cfg80211_post_voss_start(hdd_adapter_t* pAdapter);
 
 void wlan_hdd_cfg80211_pre_voss_stop(hdd_adapter_t* pAdapter);
 
+#ifdef CONFIG_ENABLE_LINUX_REG
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0))
+void wlan_hdd_linux_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request);
+#else
+int wlan_hdd_linux_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request);
+#endif
+#else
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0))
 void wlan_hdd_crda_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request);
 #else
 int wlan_hdd_crda_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request);
 #endif
-int wlan_hdd_get_crda_regd_entry(struct wiphy *wiphy, hdd_config_t *pCfg);
+#endif
+
 extern v_VOID_t hdd_connSetConnectionState( hdd_station_ctx_t *pHddStaCtx,
                                         eConnectionState connState );
 VOS_STATUS wlan_hdd_validate_operation_channel(hdd_adapter_t *pAdapter,int channel);

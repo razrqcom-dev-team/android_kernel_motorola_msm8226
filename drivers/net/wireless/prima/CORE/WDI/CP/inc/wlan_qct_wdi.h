@@ -406,6 +406,11 @@ typedef enum
   /* Periodic Tx Pattern FW Indication */
   WDI_PERIODIC_TX_PTRN_FW_IND,
 
+#ifdef FEATURE_WLAN_BATCH_SCAN
+  /*Batch scan result indication from FW*/
+  WDI_BATCH_SCAN_RESULT_IND,
+#endif
+
   WDI_MAX_IND
 }WDI_LowLevelIndEnumType;
 
@@ -638,6 +643,84 @@ typedef struct
     wpt_uint32 patternIdBitmap;
 } WDI_PeriodicTxPtrnFwIndType;
 
+#ifdef FEATURE_WLAN_BATCH_SCAN
+/*---------------------------------------------------------------------------
+  WDI_SetBatchScanReqType
+---------------------------------------------------------------------------*/
+typedef struct
+{
+    wpt_uint32 scanFrequency;        /* how frequent to do scan default 30Sec*/
+    wpt_uint32 numberOfScansToBatch; /* number of scans to batch */
+    wpt_uint32 bestNetwork;          /* best networks in terms of rssi */
+    wpt_uint8  rfBand;               /* band to scan :
+                                      0 ->both Band, 1->2.4Ghz Only
+                                      and 2-> 5GHz Only */
+    wpt_uint32 rtt;                  /* set if required to do RTT it is not
+                                      supported in current version */
+}WDI_SetBatchScanReqType;
+
+/*---------------------------------------------------------------------------
+  WDI_SetBatchScanRspType
+---------------------------------------------------------------------------*/
+typedef struct
+{
+  /*max number of scans which FW can cache*/
+  wpt_uint32 nScansToBatch;
+}WDI_SetBatchScanRspType;
+
+/*---------------------------------------------------------------------------
+  WDI_TriggerBatchScanResultIndType
+---------------------------------------------------------------------------*/
+typedef struct
+{
+    wpt_uint32 param;
+}WDI_TriggerBatchScanResultIndType;
+
+/*---------------------------------------------------------------------------
+  WDI_StopBatchScanIndType
+---------------------------------------------------------------------------*/
+typedef struct
+{
+  /*max number of scans which FW can cache*/
+  wpt_uint32 param;
+}WDI_StopBatchScanIndType;
+
+
+/*---------------------------------------------------------------------------
+ * WDI_BatchScanResultIndType
+ *--------------------------------------------------------------------------*/
+typedef struct
+{
+    wpt_uint32   bssid[6];     /* BSSID */
+    wpt_uint32   ssid[32];     /* SSID */
+    wpt_uint32   ch;           /* Channel */
+    wpt_uint32   rssi;         /* RSSI or Level */
+    /* Timestamp when Network was found. Used to calculate age based on
+       timestamp in GET_RSP msg header */
+    wpt_uint32  timestamp;
+} tWDIBatchScanNetworkInfo, *tpWDIBatchScanNetworkInfo;
+
+typedef struct
+{
+    wpt_uint32   scanId; /*Scan List ID*/
+    /*No of AP in a Scan Result. Should be same as bestNetwork in SET_REQ msg*/
+    wpt_uint32   numNetworksInScanList;
+    /*Variable data ptr: Number of AP in Scan List*/
+    wpt_uint32    scanList[1];
+} tWDIBatchScanList, *tpWDIBatchScanList;
+
+typedef struct
+{
+    wpt_uint32      timestamp;
+    wpt_uint32      numScanLists;
+    wpt_boolean     isLastResult;
+    /* Variable Data ptr: Number of Scan Lists*/
+    wpt_uint32      scanResults[1];
+}  tWDIBatchScanResultParam, *tpWDIBatchScanResultParam;
+
+#endif
+
+
 /*---------------------------------------------------------------------------
  WDI_IbssPeerInactivityIndType
 -----------------------------------------------------------------------------*/
@@ -707,6 +790,12 @@ typedef struct
 
     /* Periodic TX Pattern FW Indication */
     WDI_PeriodicTxPtrnFwIndType  wdiPeriodicTxPtrnFwInd;
+
+#ifdef FEATURE_WLAN_BATCH_SCAN
+    /*batch scan result indication from FW*/
+    void *pBatchScanResult;
+#endif
+
   }  wdiIndicationData;
 }WDI_LowLevelIndType;
 
@@ -4550,7 +4639,7 @@ typedef struct
   wpt_uint8    ucChannelCount;
 
   /*the actual channels*/
-  wpt_uint8    aChannels[WDI_PNO_MAX_NETW_CHANNELS];
+  wpt_uint8    aChannels[WDI_PNO_MAX_NETW_CHANNELS_EX];
 
   /*rssi threshold that a network must meet to be considered, 0 - for any*/
   wpt_uint8    rssiThreshold;
@@ -4665,6 +4754,7 @@ typedef struct WDIMobilityDomainInfo
 typedef struct
 {
   wpt_boolean RoamScanOffloadEnabled;
+  wpt_boolean MAWCEnabled;
   wpt_uint8   LookupThreshold;
   wpt_uint8   RoamRssiDiff;
   wpt_uint8   ChannelCacheType;
@@ -6995,6 +7085,31 @@ typedef void  (*WDI_UpdateVHTOpModeCb)(WDI_Status   wdiStatus,
 typedef void  (*WDI_LphbCfgCb)(WDI_Status   wdiStatus,
                                 void*        pUserData);
 #endif /* FEATURE_WLAN_LPHB */
+
+#ifdef FEATURE_WLAN_BATCH_SCAN
+/*---------------------------------------------------------------------------
+   WDI_SetBatchScanCb
+
+   DESCRIPTION
+
+   This callback is invoked by DAL when it has received a get batch scan
+   response from the underlying device.
+
+   PARAMETERS
+
+    IN
+    wdiStatus:  response status received from HAL
+    pUserData:  user data
+
+
+
+  RETURN VALUE
+    The result code associated with performing the operation
+---------------------------------------------------------------------------*/
+typedef void (*WDI_SetBatchScanCb)(void *pData, WDI_SetBatchScanRspType *pRsp);
+
+#endif
+
 
 /*========================================================================
  *     Function Declarations and Documentation
@@ -9954,6 +10069,53 @@ WDI_Status WDI_LPHBConfReq
    WDI_LphbCfgCb lphbCfgCb
 );
 #endif /* FEATURE_WLAN_LPHB */
+
+#ifdef FEATURE_WLAN_BATCH_SCAN
+/**
+ @brief WDI_SetBatchScanReq
+    This API is called to set batch scan request in FW
+
+ @param pBatchScanReqParam : pointer to set batch scan re param
+        usrData : Client context
+        setBatchScanRspCb : set batch scan resp callback
+ @see
+ @return SUCCESS or FAIL
+*/
+WDI_Status WDI_SetBatchScanReq
+(
+   void *pBatchScanReqParam,
+   void *usrData,
+   WDI_SetBatchScanCb setBatchScanRspCb
+);
+
+/**
+ @brief WDI_StopBatchScanInd
+
+ @param none
+
+ @see
+
+ @return Status of the request
+*/
+WDI_Status
+WDI_StopBatchScanInd(WDI_StopBatchScanIndType *pWdiReq);
+
+/**
+ @brief WDI_TriggerBatchScanResultInd
+    This API is called to pull batch scan result from FW
+
+ @param pBatchScanReqParam : pointer to trigger batch scan ind param
+        usrData : Client context
+        setBatchScanRspCb : get batch scan resp callback
+ @see
+ @return SUCCESS or FAIL
+*/
+WDI_Status
+WDI_TriggerBatchScanResultInd(WDI_TriggerBatchScanResultIndType *pWdiReq);
+
+
+#endif /*FEATURE_WLAN_BATCH_SCAN*/
+
 #ifdef __cplusplus
  }
 #endif 

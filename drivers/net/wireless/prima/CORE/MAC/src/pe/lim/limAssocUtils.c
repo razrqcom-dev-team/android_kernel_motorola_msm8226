@@ -695,13 +695,18 @@ limCleanupRxPath(tpAniSirGlobal pMac, tpDphHashNode pStaDs,tpPESession psessionE
         psessionEntry->limMlmState = eLIM_MLM_WT_DEL_STA_RSP_STATE;
         /* Deactivating probe after heart beat timer */
         limDeactivateAndChangeTimer(pMac, eLIM_PROBE_AFTER_HB_TIMER);
+        limDeactivateAndChangeTimer(pMac, eLIM_JOIN_FAIL_TIMER);
         limHeartBeatDeactivateAndChangeTimer(pMac, psessionEntry);
         limDeactivateAndChangeTimer(pMac, eLIM_KEEPALIVE_TIMER);
         pMac->lim.gLastBeaconDtimCount = 0;
         pMac->lim.gLastBeaconDtimPeriod = 0;
 
 #ifdef FEATURE_WLAN_CCX
+#ifdef FEATURE_WLAN_CCX_UPLOAD
+        limSendSmeTsmIEInd(pMac, psessionEntry, 0, 0, 0);
+#else
         limDeactivateAndChangeTimer(pMac,eLIM_TSM_TIMER);
+#endif /* FEATURE_WLAN_CCX_UPLOAD */
 #endif
 
         /**
@@ -1823,7 +1828,7 @@ limPopulatePeerRateSet(tpAniSirGlobal pMac,
     isArate = 0;
 
     /* copy operational rate set from psessionEntry */
-    if ( psessionEntry->rateSet.numRates < SIR_MAC_RATESET_EID_MAX )
+    if ( psessionEntry->rateSet.numRates <= SIR_MAC_RATESET_EID_MAX )
     {
         palCopyMemory(pMac->hHdd,(tANI_U8 *)tempRateSet.rate,(tANI_U8*)(psessionEntry->rateSet.rate), psessionEntry->rateSet.numRates);
         tempRateSet.numRates = psessionEntry->rateSet.numRates;
@@ -1833,9 +1838,12 @@ limPopulatePeerRateSet(tpAniSirGlobal pMac,
         limLog(pMac, LOGE, FL("more than SIR_MAC_RATESET_EID_MAX rates\n"));
         goto error;
     }
-    if (psessionEntry->dot11mode == WNI_CFG_PHY_MODE_11G)
+    if ((psessionEntry->dot11mode == WNI_CFG_DOT11_MODE_11G) ||
+        (psessionEntry->dot11mode == WNI_CFG_DOT11_MODE_11A) ||
+        (psessionEntry->dot11mode == WNI_CFG_DOT11_MODE_11N))
     {
-        if (psessionEntry->extRateSet.numRates < SIR_MAC_RATESET_EID_MAX)
+
+        if (psessionEntry->extRateSet.numRates <= SIR_MAC_RATESET_EID_MAX)
         {
             palCopyMemory(pMac->hHdd,(tANI_U8 *)tempRateSet2.rate, (tANI_U8*)(psessionEntry->extRateSet.rate), psessionEntry->extRateSet.numRates);
             tempRateSet2.numRates = psessionEntry->extRateSet.numRates;
@@ -1847,7 +1855,7 @@ limPopulatePeerRateSet(tpAniSirGlobal pMac,
     }
     else
         tempRateSet2.numRates = 0;
-    if ((tempRateSet.numRates + tempRateSet2.numRates) > 12)
+    if ((tempRateSet.numRates + tempRateSet2.numRates) > SIR_MAC_RATESET_EID_MAX)
     {
         //we are in big trouble
         limLog(pMac, LOGP, FL("more than 12 rates in CFG"));
@@ -2653,7 +2661,7 @@ tSirRetStatus limAddFTStaSelf(tpAniSirGlobal pMac, tANI_U16 assocId, tpPESession
 
 
 #if defined WLAN_FEATURE_VOWIFI_11R_DEBUG
-    limLog( pMac, LOGE, FL( "Sending SIR_HAL_ADD_STA_REQ... (aid %d)" ), pAddStaParams->assocId);
+    limLog( pMac, LOG1, FL( "Sending SIR_HAL_ADD_STA_REQ... (aid %d)" ), pAddStaParams->assocId);
 #endif
     MTRACE(macTraceMsgTx(pMac, psessionEntry->peSessionId, msgQ.type));
 
@@ -3248,6 +3256,12 @@ limDelBss(tpAniSirGlobal pMac, tpDphHashNode pStaDs, tANI_U16 bssIdx,tpPESession
         pDelBssParams->bssIdx          = bssIdx;
     psessionEntry->limMlmState = eLIM_MLM_WT_DEL_BSS_RSP_STATE;
     MTRACE(macTrace(pMac, TRACE_CODE_MLM_STATE, psessionEntry->peSessionId, eLIM_MLM_WT_DEL_BSS_RSP_STATE));
+
+    if((psessionEntry->peSessionId == pMac->lim.limTimers.gLimJoinFailureTimer.sessionId) &&
+       (VOS_TRUE == tx_timer_running(&pMac->lim.limTimers.gLimJoinFailureTimer)))
+    {
+        limDeactivateAndChangeTimer(pMac, eLIM_JOIN_FAIL_TIMER);
+    }
 
     pDelBssParams->status= eHAL_STATUS_SUCCESS;
     pDelBssParams->respReqd = 1;
@@ -4187,3 +4201,49 @@ void limSendSmeUnprotectedMgmtFrameInd(
     return;
 }
 #endif
+
+#if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
+/** -------------------------------------------------------------
+\fn     limSendSmeTsmIEInd
+\brief  Forwards the TSM IE information to SME.
+\param  tpAniSirGlobal    pMac
+\param  psessionEntry - PE session context
+\param  tid - traffic id
+\param  state - tsm state (enabled/disabled)
+\param  measurementInterval - measurement interval
+\return none
+  -------------------------------------------------------------*/
+void limSendSmeTsmIEInd(tpAniSirGlobal pMac, tpPESession psessionEntry,
+                            tANI_U8 tid, tANI_U8 state, tANI_U16 measInterval)
+{
+    tSirMsgQ         mmhMsg;
+    tpSirSmeTsmIEInd pSirSmeTsmIeInd = NULL;
+
+    if (!pMac || !psessionEntry)
+    {
+        return;
+    }
+    pSirSmeTsmIeInd = vos_mem_malloc(sizeof(tSirSmeTsmIEInd));
+    if (NULL == pSirSmeTsmIeInd)
+    {
+        limLog(pMac, LOGP,
+               FL("AllocateMemory failed for tSirSmeTsmIEInd"));
+        return;
+    }
+    vos_mem_set((void*)pSirSmeTsmIeInd, sizeof(tSirSmeTsmIEInd), 0);
+
+    pSirSmeTsmIeInd->sessionId = psessionEntry->smeSessionId;
+    pSirSmeTsmIeInd->tsmIe.tsid = tid;
+    pSirSmeTsmIeInd->tsmIe.state= state;
+    pSirSmeTsmIeInd->tsmIe.msmt_interval= measInterval;
+
+    mmhMsg.type = eWNI_SME_TSM_IE_IND;
+    mmhMsg.bodyptr = pSirSmeTsmIeInd;
+    mmhMsg.bodyval = 0;
+
+    limSysProcessMmhMsgApi(pMac, &mmhMsg, ePROT);
+    return;
+}
+#endif /* FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
+
+

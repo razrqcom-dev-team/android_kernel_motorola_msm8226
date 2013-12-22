@@ -117,7 +117,7 @@ static ssize_t wcnss_patterngen_write(struct file *file,
                const char __user *buf, size_t count, loff_t *ppos)
 {
     hdd_adapter_t *pAdapter = (hdd_adapter_t *)file->private_data;
-    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+    hdd_context_t *pHddCtx;
     tSirAddPeriodicTxPtrn *addPeriodicTxPtrnParams;
     tSirDelPeriodicTxPtrn *delPeriodicTxPtrnParams;
 
@@ -136,6 +136,8 @@ static ssize_t wcnss_patterngen_write(struct file *file,
 
         return -EINVAL;
     }
+
+    pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
 
     if (!sme_IsFeatureSupportedByFW(WLAN_PERIODIC_TX_PTRN))
     {
@@ -220,7 +222,7 @@ static ssize_t wcnss_patterngen_write(struct file *file,
     {
         VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                    "%s: Not in Connected state!", __func__);
-
+        vos_mem_free(cmd);
         return -EINVAL;
     }
 
@@ -287,7 +289,7 @@ static ssize_t wcnss_patterngen_write(struct file *file,
 
 failure:
     vos_mem_free(cmd);
-    return EINVAL;
+    return -EINVAL;
 }
 
 static int wcnss_debugfs_open(struct inode *inode, struct file *file)

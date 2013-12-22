@@ -118,17 +118,21 @@ v_U8_t ccpRSNOui07[ HDD_RSN_OUI_SIZE ] = { 0x00, 0x0F, 0xAC, 0x06 }; // RSN-PSK-
 
 #define BEACON_FRAME_IES_OFFSET 12
 
-
-#ifdef WLAN_FEATURE_PACKET_FILTERING
-extern int wlan_hdd_update_v6_filters(hdd_adapter_t *pAdapter, v_U8_t set); // IKJB42MAIN-1244, Motorola, a19091
-#endif
-
 #ifdef WLAN_FEATURE_11W
 void hdd_indicateUnprotMgmtFrame(hdd_adapter_t *pAdapter,
                             tANI_U32 nFrameLength,
                             tANI_U8* pbFrames,
                             tANI_U8 frameType );
 #endif
+
+#if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
+static void hdd_indicateTsmIe(hdd_adapter_t *pAdapter, tANI_U8 tid,
+                            tANI_U8  state,
+                            tANI_U16 measInterval );
+static void hdd_indicateCckmPreAuth(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo);
+static void hdd_indicateCcxAdjApRepInd(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo);
+
+#endif /* FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
 
 static eHalStatus hdd_RoamSetKeyCompleteHandler( hdd_adapter_t *pAdapter,
                                                 tCsrRoamInfo *pRoamInfo,
@@ -1160,10 +1164,6 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
             pAdapter->wapi_info.fIsWapiSta = 0;
         }
 #endif  /* FEATURE_WLAN_WAPI */
-
-        // IKJB42MAIN-1244, Motorola, a19091 - START
-        wlan_hdd_update_v6_filters(pAdapter, (pAdapter->mc_addr_list.mc_cnt==0)?1:0);
-        // IKJB42MAIN-1244, Motorola, a19091 - END
 
         // indicate 'connect' status to userspace
         hdd_SendAssociationEvent(dev,pRoamInfo);
@@ -2502,7 +2502,14 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
                     hdd_conf_mcastbcast_filter(pHddCtx, FALSE);
                     pHddCtx->configuredMcastBcastFilter =
                         pHddCtx->sus_res_mcastbcast_filter;
+                    pHddCtx->sus_res_mcastbcast_filter_valid = VOS_FALSE;
 
+                    hddLog(VOS_TRACE_LEVEL_INFO,
+                           "offload: disassociation happening, restoring configuredMcastBcastFilter");
+                    hddLog(VOS_TRACE_LEVEL_INFO,"McastBcastFilter = %d",
+                           pHddCtx->configuredMcastBcastFilter);
+                    hddLog(VOS_TRACE_LEVEL_INFO,
+                           "offload: already called mcastbcast filter");
                     (WLAN_HDD_GET_CTX(pAdapter))->hdd_mcastbcast_filter_set = FALSE;
                 }
 #ifdef WLAN_FEATURE_PACKET_FILTERING
@@ -2611,26 +2618,7 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
            }
            break;
 #endif
-//Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
-#ifdef FEATURE_WLAN_LFR_METRICS
-          case eCSR_ROAM_PREAUTH_INIT_NOTIFY:
-             /* This event is to notify pre-auth initiation */
-             halStatus = wlan_hdd_cfg80211_roam_metrics_preauth(pAdapter, pRoamInfo);
-             break;
-          case eCSR_ROAM_PREAUTH_STATUS_SUCCESS:
-             /* This event will notify pre-auth completion in case of success */
-             halStatus = wlan_hdd_cfg80211_roam_metrics_preauth_status(pAdapter, pRoamInfo, 1);
-             break;
-          case eCSR_ROAM_PREAUTH_STATUS_FAILURE:
-             /* This event will notify pre-auth completion in case of failure. */
-             halStatus = wlan_hdd_cfg80211_roam_metrics_preauth_status(pAdapter,pRoamInfo, 0);
-             break;
-          case eCSR_ROAM_HANDOVER_SUCCESS:
-             /* This event is to notify handover success. It will be only invoked on success */
-             halStatus = wlan_hdd_cfg80211_roam_metrics_handover(pAdapter, pRoamInfo);
-             break;
-#endif
-//End fjdw67 Motorola, IKJB42MAIN-6385
+
         case eCSR_ROAM_INDICATE_MGMT_FRAME:
             hdd_indicateMgmtFrame( pAdapter,
                                   pRoamInfo->nFrameLength,
@@ -2662,6 +2650,28 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
                                          pRoamInfo->frameType);
             break;
 #endif
+#if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
+       case eCSR_ROAM_TSM_IE_IND:
+            hdd_indicateTsmIe(pAdapter, pRoamInfo->tsmIe.tsid,
+                pRoamInfo->tsmIe.state, pRoamInfo->tsmIe.msmt_interval);
+           break;
+
+       case eCSR_ROAM_CCKM_PREAUTH_NOTIFY:
+          {
+              if (eCSR_AUTH_TYPE_CCKM_WPA == pHddStaCtx->conn_info.authType ||
+                  eCSR_AUTH_TYPE_CCKM_RSN == pHddStaCtx->conn_info.authType)
+              {
+                  hdd_indicateCckmPreAuth(pAdapter, pRoamInfo);
+              }
+              break;
+          }
+
+       case eCSR_ROAM_CCX_ADJ_AP_REPORT_IND:
+         {
+             hdd_indicateCcxAdjApRepInd(pAdapter, pRoamInfo);
+             break;
+         }
+#endif /* FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
         default:
             break;
     }
@@ -3830,3 +3840,94 @@ void hdd_indicateUnprotMgmtFrame( hdd_adapter_t *pAdapter,
     }
 }
 #endif
+
+#if defined (FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
+void hdd_indicateTsmIe(hdd_adapter_t *pAdapter, tANI_U8 tid,
+                                  tANI_U8 state,
+                                  tANI_U16 measInterval )
+{
+    union iwreq_data wrqu;
+    char buf[IW_CUSTOM_MAX + 1];
+
+    if (NULL == pAdapter)
+        return;
+
+    // create the event
+    memset(&wrqu, '\0', sizeof(wrqu));
+    memset(buf, '\0', sizeof(buf));
+
+    hddLog(VOS_TRACE_LEVEL_INFO, "TSM Ind tid(%d) state(%d) MeasInt(%d)",
+                        tid, state, measInterval);
+
+    snprintf(buf, IW_CUSTOM_MAX, "TSMIE=%d:%d:%d",tid,state,measInterval);
+
+    wrqu.data.pointer = buf;
+    wrqu.data.length = strlen(buf);
+    // send the event
+    wireless_send_event(pAdapter->dev, IWEVCUSTOM, &wrqu, buf);
+}
+
+void hdd_indicateCckmPreAuth(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo)
+{
+    union iwreq_data wrqu;
+    char buf[IW_CUSTOM_MAX + 1];
+    char *pos = buf;
+    int nBytes = 0, freeBytes = IW_CUSTOM_MAX;
+
+    if ((NULL == pAdapter) || (NULL == pRoamInfo))
+        return;
+
+    // create the event
+    memset(&wrqu, '\0', sizeof(wrqu));
+    memset(buf, '\0', sizeof(buf));
+
+    /* Timestamp0 is lower 32 bits and Timestamp1 is upper 32 bits */
+    hddLog(VOS_TRACE_LEVEL_INFO, "CCXPREAUTHNOTIFY=%02x:%02x:%02x:%02x:%02x:%02x %lu:%lu",
+        pRoamInfo->bssid[0], pRoamInfo->bssid[1], pRoamInfo->bssid[2],
+        pRoamInfo->bssid[3], pRoamInfo->bssid[4], pRoamInfo->bssid[5],
+        pRoamInfo->timestamp[0], pRoamInfo->timestamp[1]);
+
+    nBytes = snprintf(pos, freeBytes, "CCXPREAUTHNOTIFY=");
+    pos += nBytes;
+    freeBytes -= nBytes;
+
+    vos_mem_copy(pos, pRoamInfo->bssid, WNI_CFG_BSSID_LEN);
+    pos += WNI_CFG_BSSID_LEN;
+    freeBytes -= WNI_CFG_BSSID_LEN;
+
+    snprintf(pos, freeBytes, " %lu:%lu", pRoamInfo->timestamp[0], pRoamInfo->timestamp[1]);
+
+    wrqu.data.pointer = buf;
+    wrqu.data.length = strlen(buf);
+    hddLog(VOS_TRACE_LEVEL_ERROR, "Event data len(%d) data(%s)",
+                                     strlen(buf), buf);
+
+    // send the event
+    wireless_send_event(pAdapter->dev, IWEVCUSTOM, &wrqu, buf);
+}
+
+void hdd_indicateCcxAdjApRepInd(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo)
+{
+    union iwreq_data wrqu;
+    char buf[IW_CUSTOM_MAX + 1];
+
+    if ((NULL == pAdapter) || (NULL == pRoamInfo))
+        return;
+
+    // create the event
+    memset(&wrqu, '\0', sizeof(wrqu));
+    memset(buf, '\0', sizeof(buf));
+
+    hddLog(VOS_TRACE_LEVEL_INFO, "CCXADJAPREP=%u", pRoamInfo->tsmRoamDelay);
+
+    snprintf(buf, IW_CUSTOM_MAX, "CCXADJAPREP=%u", pRoamInfo->tsmRoamDelay);
+
+    wrqu.data.pointer = buf;
+    wrqu.data.length = strlen(buf);
+
+    // send the event
+    wireless_send_event(pAdapter->dev, IWEVCUSTOM, &wrqu, buf);
+}
+
+#endif /* FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
+
