@@ -21,6 +21,14 @@
 	};
 };
 
+&mdss_mdp {
+	qcom,mdss-pref-prim-intf = "dsi";
+};
+
+&mdss_dsi0 {
+	qcom,dsi-pref-prim-pan = <&mot_cmi_720p_vid_v2>;
+};
+
 &soc {
 	factory_support {
 		compatible = "mmi,factory-support-msm8960";
@@ -31,6 +39,12 @@
 
 	serial@f991f000 {
 		status = "ok";
+	};
+
+	qcom,msm-efuse {
+		compatible = "qcom,msm-efuse";
+		qcom,memory-reservation-type = "EBI1";
+		qcom,memory-reservation-size = <0x1000>; /* 4kb from EBI1 buffer */
 	};
 
 	ram_console {
@@ -220,6 +234,7 @@
 &pm8226_l28 {
 	regulator-max-microvolt = <3400000>;
 	qcom,init-voltage = <3100000>;
+	regulator-boot-on;
 };
 
 &pm8226_chg {
@@ -456,7 +471,13 @@
 				qcom,mode-ctrl = <0x60>;
 				qcom,pwm-channel = <5>;
 				qcom,pwm-us = <1000>;
-				qcom,blink-en = <1>;
+			};
+
+		qcom,led_rgb {
+				label = "combo";
+				linux,name = "rgb";
+				qcom,max-current = <12>;
+				qcom,id = <9>;
 			};
 		};
 
@@ -800,5 +821,5 @@
 };
 
 &secure_mem {
-	reg = <0 0x3C00000>;
+	reg = <0 0x4600000>;
 };

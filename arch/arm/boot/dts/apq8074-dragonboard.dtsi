@@ -23,9 +23,12 @@
 		status = "ok";
 	};
 
-	qcom,mdss_dsi_sharp_qhd_video {
-		status = "ok";
-		qcom,cont-splash-enabled;
+	qcom,mdss_dsi@fd922800 {
+		qcom,dsi-pref-prim-pan = <&dsi_sharp_qhd_vid>;
+	};
+
+	qcom,mdss_mdp@fd900000 {
+		qcom,mdss-pref-prim-intf = "dsi";
 	};
 
 	qcom,hdmi_tx@fd922100 {
@@ -501,13 +504,6 @@
 	};
 
 	gpio@e300 { /* GPIO 36 */
-		qcom,mode = <1>;  /* QPNP_PIN_MODE_DIG_OUT */
-		qcom,output-type = <0>; /* QPNP_PIN_OUT_BUF_CMOS */
-		qcom,pull = <5>; /* QPNP_PIN_PULL_NO */
-		qcom,vin-sel = <2>; /* QPNP_PIN_VIN2 */
-		qcom,out-strength = <3>; /* QPNP_PIN_OUT_STRENGTH_HIGH */
-		qcom,src-sel = <3>; /* QPNP_PIN_SEL_FUNC_2 */
-		qcom,master-en = <1>;
 	};
 };
 
@@ -669,4 +665,8 @@
 	qcom,pad-drv-on = <0x4 0x4 0x4>; /* 10mA, 10mA, 10mA */
 	qcom,pad-drv-off = <0x0 0x0 0x0>; /* 2mA, 2mA, 2mA */
 	status = "ok";
+};
+
+&dsi_sharp_qhd_vid {
+	qcom,cont-splash-enabled;
 };

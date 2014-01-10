@@ -41,6 +41,14 @@ int mdss_dsi_clk_init(struct platform_device *pdev,
 	}
 
 	dev = &pdev->dev;
+	ctrl_pdata->mdp_core_clk = clk_get(dev, "mdp_core_clk");
+	if (IS_ERR(ctrl_pdata->mdp_core_clk)) {
+		rc = PTR_ERR(ctrl_pdata->mdp_core_clk);
+		pr_err("%s: Unable to get mdp core clk. rc=%d\n",
+			__func__, rc);
+		goto mdss_dsi_clk_err;
+	}
+
 	ctrl_pdata->ahb_clk = clk_get(dev, "iface_clk");
 	if (IS_ERR(ctrl_pdata->ahb_clk)) {
 		rc = PTR_ERR(ctrl_pdata->ahb_clk);
@@ -102,18 +110,71 @@ void mdss_dsi_clk_deinit(struct mdss_dsi_ctrl_pdata  *ctrl_pdata)
 		clk_put(ctrl_pdata->axi_clk);
 	if (ctrl_pdata->ahb_clk)
 		clk_put(ctrl_pdata->ahb_clk);
+	if (ctrl_pdata->mdp_core_clk)
+		clk_put(ctrl_pdata->mdp_core_clk);
 }
 
 #define PREF_DIV_RATIO 27
 struct dsiphy_pll_divider_config pll_divider_config;
 
-int mdss_dsi_clk_div_config(u8 bpp, u8 lanes,
-			    u32 *expected_dsi_pclk)
+int mdss_dsi_clk_div_config(struct mdss_panel_info *panel_info,
+			    int frame_rate)
 {
 	u32 fb_divider, rate, vco;
 	u32 div_ratio = 0;
 	u32 pll_analog_posDiv = 1;
+	u32 h_period, v_period;
+	u32 dsi_pclk_rate;
+	u8 lanes = 0, bpp;
 	struct dsi_clk_mnd_table const *mnd_entry = mnd_table;
+
+	if (panel_info->mipi.data_lane3)
+		lanes += 1;
+	if (panel_info->mipi.data_lane2)
+		lanes += 1;
+	if (panel_info->mipi.data_lane1)
+		lanes += 1;
+	if (panel_info->mipi.data_lane0)
+		lanes += 1;
+
+	switch (panel_info->mipi.dst_format) {
+	case DSI_CMD_DST_FORMAT_RGB888:
+	case DSI_VIDEO_DST_FORMAT_RGB888:
+	case DSI_VIDEO_DST_FORMAT_RGB666_LOOSE:
+		bpp = 3;
+		break;
+	case DSI_CMD_DST_FORMAT_RGB565:
+	case DSI_VIDEO_DST_FORMAT_RGB565:
+		bpp = 2;
+		break;
+	default:
+		bpp = 3;	/* Default format set to RGB888 */
+		break;
+	}
+
+	h_period = mdss_panel_get_htotal(panel_info);
+	v_period = mdss_panel_get_vtotal(panel_info);
+
+	if ((frame_rate !=
+	     panel_info->mipi.frame_rate) ||
+	    (!panel_info->clk_rate)) {
+		h_period += panel_info->lcdc.xres_pad;
+		v_period += panel_info->lcdc.yres_pad;
+
+		if (lanes > 0) {
+			panel_info->clk_rate =
+			((h_period * v_period *
+			  frame_rate * bpp * 8)
+			   / lanes);
+		} else {
+			pr_err("%s: forcing mdss_dsi lanes to 1\n", __func__);
+			panel_info->clk_rate =
+				(h_period * v_period * frame_rate * bpp * 8);
+		}
+	}
+	pll_divider_config.clk_rate = panel_info->clk_rate;
+
+
 	if (pll_divider_config.clk_rate == 0)
 		pll_divider_config.clk_rate = 454000000;
 
@@ -177,8 +238,12 @@ int mdss_dsi_clk_div_config(u8 bpp, u8 lanes,
 		dsi_pclk.n = mnd_entry->pclk_n;
 		dsi_pclk.d = mnd_entry->pclk_d;
 	}
-	*expected_dsi_pclk = (((pll_divider_config.clk_rate) * lanes)
+	dsi_pclk_rate = (((pll_divider_config.clk_rate) * lanes)
 				      / (8 * bpp));
+
+	if ((dsi_pclk_rate < 3300000) || (dsi_pclk_rate > 250000000))
+		dsi_pclk_rate = 35000000;
+	panel_info->mipi.dsi_pclk_rate = dsi_pclk_rate;
 
 	return 0;
 }
@@ -187,9 +252,17 @@ int mdss_dsi_enable_bus_clocks(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int rc = 0;
 
+	rc = clk_prepare_enable(ctrl_pdata->mdp_core_clk);
+	if (rc) {
+		pr_err("%s: failed to enable mdp_core_clock. rc=%d\n",
+							 __func__, rc);
+		goto error;
+	}
+
 	rc = clk_prepare_enable(ctrl_pdata->ahb_clk);
 	if (rc) {
 		pr_err("%s: failed to enable ahb clock. rc=%d\n", __func__, rc);
+		clk_disable_unprepare(ctrl_pdata->mdp_core_clk);
 		goto error;
 	}
 
@@ -197,6 +270,7 @@ int mdss_dsi_enable_bus_clocks(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	if (rc) {
 		pr_err("%s: failed to enable ahb clock. rc=%d\n", __func__, rc);
 		clk_disable_unprepare(ctrl_pdata->ahb_clk);
+		clk_disable_unprepare(ctrl_pdata->mdp_core_clk);
 		goto error;
 	}
 
@@ -208,6 +282,7 @@ void mdss_dsi_disable_bus_clocks(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	clk_disable_unprepare(ctrl_pdata->axi_clk);
 	clk_disable_unprepare(ctrl_pdata->ahb_clk);
+	clk_disable_unprepare(ctrl_pdata->mdp_core_clk);
 }
 
 static int mdss_dsi_clk_prepare(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
@@ -518,7 +593,7 @@ void mdss_dsi_phy_init(struct mdss_panel_data *pdata)
 		return;
 	}
 
-	pd = ((ctrl_pdata->panel_data).panel_info.mipi).dsi_phy_db;
+	pd = &(((ctrl_pdata->panel_data).panel_info.mipi).dsi_phy_db);
 
 	/* Strength ctrl 0 */
 	MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x0484, pd->strength[0]);
@@ -578,7 +653,7 @@ void mdss_dsi_phy_init(struct mdss_panel_data *pdata)
 		for (i = 0; i < 9; i++) {
 			offset = i + (ln * 9);
 			MIPI_OUTP((ctrl_pdata->ctrl_base) + off,
-							pd->laneCfg[offset]);
+							pd->lanecfg[offset]);
 			wmb();
 			off += 4;
 		}
@@ -597,7 +672,7 @@ void mdss_dsi_phy_init(struct mdss_panel_data *pdata)
 
 	off = 0x04b4;	/* phy BIST ctrl 0 - 5 */
 	for (i = 0; i < 6; i++) {
-		MIPI_OUTP((ctrl_pdata->ctrl_base) + off, pd->bistCtrl[i]);
+		MIPI_OUTP((ctrl_pdata->ctrl_base) + off, pd->bistctrl[i]);
 		wmb();
 		off += 4;
 	}

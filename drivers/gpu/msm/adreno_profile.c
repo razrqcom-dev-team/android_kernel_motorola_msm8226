@@ -597,7 +597,7 @@ static void _add_assignment(struct adreno_device *adreno_dev,
 static char *_parse_next_assignment(struct adreno_device *adreno_dev,
 		char *str, int *groupid, int *countable, bool *remove)
 {
-	char *groupid_str, *countable_str;
+	char *groupid_str, *countable_str, *next_str = NULL;
 	int ret;
 
 	*groupid = -EINVAL;
@@ -635,8 +635,15 @@ static char *_parse_next_assignment(struct adreno_device *adreno_dev,
 	if (countable_str == str)
 		return NULL;
 
-	*str = '\0';
-	str++;
+	/*
+	 * If we have reached the end of the original string then make sure we
+	 * return NULL from this function or we could accidently overrun
+	 */
+
+	if (*str != '\0') {
+		*str = '\0';
+		next_str = str + 1;
+	}
 
 	/* set results */
 	*groupid = adreno_perfcounter_get_groupid(adreno_dev,
@@ -647,7 +654,7 @@ static char *_parse_next_assignment(struct adreno_device *adreno_dev,
 	if (ret)
 		return NULL;
 
-	return str;
+	return next_str;
 }
 
 static ssize_t profile_assignments_write(struct file *filep,
@@ -659,7 +666,7 @@ static ssize_t profile_assignments_write(struct file *filep,
 	size_t size = 0;
 	char *buf, *pbuf;
 	bool remove_assignment = false;
-	int groupid, countable;
+	int groupid, countable, ret;
 
 	if (len >= PAGE_SIZE || len == 0)
 		return -EINVAL;
@@ -674,7 +681,9 @@ static ssize_t profile_assignments_write(struct file *filep,
 		goto error_unlock;
 	}
 
-	kgsl_active_count_get(device);
+	ret = kgsl_active_count_get(device);
+	if (ret)
+		return -EINVAL;
 
 	/*
 	 * When adding/removing assignments, ensure that the GPU is done with

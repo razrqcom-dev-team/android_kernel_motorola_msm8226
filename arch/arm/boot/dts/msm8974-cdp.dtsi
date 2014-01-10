@@ -24,9 +24,12 @@
 		status = "ok";
 	};
 
-	qcom,mdss_dsi_toshiba_720p_video {
-		status = "ok";
-		qcom,cont-splash-enabled;
+	qcom,mdss_dsi@fd922800 {
+		qcom,dsi-pref-prim-pan = <&dsi_tosh_720_vid>;
+	};
+
+	qcom,mdss_mdp@fd900000 {
+		qcom,mdss-pref-prim-intf = "dsi";
 	};
 
 	qcom,mdss_dsi_orise_720p_video {
@@ -38,6 +41,22 @@
 	};
 
 	i2c@f9924000 {
+		synaptics@20 {
+			compatible = "synaptics,rmi4";
+			reg = <0x20>;
+			interrupt-parent = <&msmgpio>;
+			interrupts = <61 0x2008>;
+			vdd-supply = <&pm8941_l18>;
+			vcc_i2c-supply = <&pm8941_lvs1>;
+			synaptics,reset-gpio = <&msmgpio 60 0x00>;
+			synaptics,irq-gpio = <&msmgpio 61 0x2008>;
+			synaptics,display-coords = <0 0 1079 1919>;
+			synaptics,i2c-pull-up;
+			synaptics,power-down;
+			synaptics,disable-gpios;
+			synaptics,do-lockdown;
+		};
+
 		atmel_mxt_ts@4a {
 			compatible = "atmel,mxt-ts";
 			reg = <0x4a>;
@@ -733,4 +752,8 @@
 
 		qcom,cdc-on-demand-supplies = "cdc-vdd-spkdrv";
 	};
+};
+
+&dsi_tosh_720_vid {
+       qcom,cont-splash-enabled;
 };

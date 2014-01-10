@@ -56,10 +56,6 @@ enum flash_command {
 	CMD_ENABLE_FLASH_PROG	= 0xF,
 };
 
-enum control_command {
-	CMD_SOFT_RESET		= 0x1,
-};
-
 #define SLEEP_MODE_NORMAL (0x00)
 #define SLEEP_MODE_SENSOR_SLEEP (0x01)
 #define SLEEP_MODE_RESERVED0 (0x02)
@@ -423,14 +419,6 @@ static unsigned int fwu_firmware_id(void)
 	return firmware_id;
 }
 
-static int fwu_write_f01_device_command(unsigned char cmd)
-{
-	return fwu->fn_ptr->write(fwu->rmi4_data,
-			fwu->f01_fd.cmd_base_addr,
-			&cmd,
-			sizeof(cmd));
-}
-
 static int fwu_read_f01_device_status(struct f01_device_status *status)
 {
 	return fwu->fn_ptr->read(fwu->rmi4_data,
@@ -579,16 +567,14 @@ static int fwu_reset_device(void)
 {
 	int retval;
 
-	dev_dbg(&fwu->rmi4_data->i2c_client->dev, "Reset device\n");
-
-	retval = fwu_write_f01_device_command(CMD_SOFT_RESET);
+	retval = fwu->rmi4_data->reset_device(fwu->rmi4_data,
+				&fwu->f01_fd.cmd_base_addr);
 	if (retval < 0) {
 		dev_err(&fwu->rmi4_data->i2c_client->dev,
-				"%s: Failed to soft reset after reflash\n",
+				"%s: Failed to reset core driver after reflash\n",
 				__func__);
 		goto exit;
 	}
-	msleep(100);
 
 	retval = fwu_scan_pdt();
 	if (retval < 0) {
@@ -605,22 +591,6 @@ static int fwu_reset_device(void)
 				__func__);
 		goto exit;
 	}
-
-	retval = fwu->rmi4_data->query_device(fwu->rmi4_data);
-	if (retval < 0) {
-		dev_err(&fwu->rmi4_data->i2c_client->dev,
-				"%s: Failed to query device after reflash\n",
-				__func__);
-		goto exit;
-	}
-	retval = fwu->rmi4_data->reset_device(fwu->rmi4_data);
-	if (retval < 0) {
-		dev_err(&fwu->rmi4_data->i2c_client->dev,
-				"%s: Failed to reset core driver after reflash\n",
-				__func__);
-		goto exit;
-	}
-
 exit:
 	return retval;
 }
@@ -1467,7 +1437,8 @@ static int fwu_start_write_config(void)
 				__func__);
 	}
 
-	fwu->rmi4_data->reset_device(fwu->rmi4_data);
+	fwu->rmi4_data->reset_device(fwu->rmi4_data,
+				&fwu->f01_fd.cmd_base_addr);
 
 	pr_notice("%s: End of write config process\n", __func__);
 
@@ -1570,8 +1541,8 @@ static int fwu_do_read_config(void)
 	}
 
 exit:
-	fwu->rmi4_data->reset_device(fwu->rmi4_data);
-
+	fwu->rmi4_data->reset_device(fwu->rmi4_data,
+				&fwu->f01_fd.cmd_base_addr);
 	return retval;
 }
 

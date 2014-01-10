@@ -27,10 +27,8 @@
 
 static DEFINE_MUTEX(mdss_mdp_sspp_lock);
 static DEFINE_MUTEX(mdss_mdp_smp_lock);
-static DECLARE_BITMAP(mdss_mdp_smp_mmb_pool, MDSS_MDP_SMP_MMB_BLOCKS);
 
 static int mdss_mdp_pipe_free(struct mdss_mdp_pipe *pipe);
-static int __mdss_mdp_pipe_smp_mmb_is_empty(unsigned long *smp);
 
 static inline void mdss_mdp_pipe_write(struct mdss_mdp_pipe *pipe,
 				       u32 reg, u32 val)
@@ -43,21 +41,29 @@ static inline u32 mdss_mdp_pipe_read(struct mdss_mdp_pipe *pipe, u32 reg)
 	return readl_relaxed(pipe->base + reg);
 }
 
-static u32 mdss_mdp_smp_mmb_reserve(unsigned long *existing,
-	unsigned long *reserve, size_t n)
+static u32 mdss_mdp_smp_mmb_reserve(struct mdss_mdp_pipe_smp_map *smp_map,
+	size_t n)
 {
 	u32 i, mmb;
+	u32 fixed_cnt = bitmap_weight(smp_map->fixed, SMP_MB_CNT);
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	if (n <= fixed_cnt)
+		return fixed_cnt;
+	else
+		n -= fixed_cnt;
 
 	/* reserve more blocks if needed, but can't free mmb at this point */
-	for (i = bitmap_weight(existing, SMP_MB_CNT); i < n; i++) {
-		if (bitmap_full(mdss_mdp_smp_mmb_pool, SMP_MB_CNT))
+	for (i = bitmap_weight(smp_map->allocated, SMP_MB_CNT); i < n; i++) {
+		if (bitmap_full(mdata->mmb_alloc_map, SMP_MB_CNT))
 			break;
 
-		mmb = find_first_zero_bit(mdss_mdp_smp_mmb_pool, SMP_MB_CNT);
-		set_bit(mmb, reserve);
-		set_bit(mmb, mdss_mdp_smp_mmb_pool);
+		mmb = find_first_zero_bit(mdata->mmb_alloc_map, SMP_MB_CNT);
+		set_bit(mmb, smp_map->reserved);
+		set_bit(mmb, mdata->mmb_alloc_map);
 	}
-	return i;
+
+	return i + fixed_cnt;
 }
 
 static int mdss_mdp_smp_mmb_set(int client_id, unsigned long *smp)
@@ -86,18 +92,15 @@ static void mdss_mdp_smp_mmb_amend(unsigned long *smp, unsigned long *extra)
 
 static void mdss_mdp_smp_mmb_free(unsigned long *smp, bool write)
 {
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
 	if (!bitmap_empty(smp, SMP_MB_CNT)) {
 		if (write)
 			mdss_mdp_smp_mmb_set(0, smp);
-		bitmap_andnot(mdss_mdp_smp_mmb_pool, mdss_mdp_smp_mmb_pool,
+		bitmap_andnot(mdata->mmb_alloc_map, mdata->mmb_alloc_map,
 			      smp, SMP_MB_CNT);
 		bitmap_zero(smp, SMP_MB_CNT);
 	}
-}
-
-static int __mdss_mdp_pipe_smp_mmb_is_empty(unsigned long *smp)
-{
-	return bitmap_weight(smp, SMP_MB_CNT) == 0;
 }
 
 static void mdss_mdp_smp_set_wm_levels(struct mdss_mdp_pipe *pipe, int mb_cnt)
@@ -229,8 +232,8 @@ int mdss_mdp_smp_reserve(struct mdss_mdp_pipe *pipe)
 
 		pr_debug("reserving %d mmb for pnum=%d plane=%d\n",
 				num_blks, pipe->num, i);
-		reserved = mdss_mdp_smp_mmb_reserve(pipe->smp_map[i].allocated,
-			pipe->smp_map[i].reserved, num_blks);
+		reserved = mdss_mdp_smp_mmb_reserve(&pipe->smp_map[i],
+			num_blks);
 		if (reserved < num_blks)
 			break;
 	}
@@ -246,7 +249,21 @@ int mdss_mdp_smp_reserve(struct mdss_mdp_pipe *pipe)
 
 	return rc;
 }
-
+/*
+ * mdss_mdp_smp_alloc() -- set smp mmb and and wm levels for a staged pipe
+ * @pipe: pointer to a pipe
+ *
+ * Function amends reserved smp mmbs to allocated bitmap and ties respective
+ * mmbs to their pipe fetch_ids. Based on the number of total allocated mmbs
+ * for a staged pipe, it also sets the watermark levels (wm).
+ *
+ * This function will be called on every commit where pipe params might not
+ * have changed. In such cases, we need to ensure that wm levels are not
+ * wiped out. Also in some rare situations hw might have reset and wiped out
+ * smp mmb programming but new smp reservation is not done. In such cases we
+ * need to ensure that for a staged pipes, mmbs are set properly based on
+ * allocated bitmap.
+ */
 static int mdss_mdp_smp_alloc(struct mdss_mdp_pipe *pipe)
 {
 	int i;
@@ -254,8 +271,14 @@ static int mdss_mdp_smp_alloc(struct mdss_mdp_pipe *pipe)
 
 	mutex_lock(&mdss_mdp_smp_lock);
 	for (i = 0; i < MAX_PLANES; i++) {
-		if (__mdss_mdp_pipe_smp_mmb_is_empty(pipe->smp_map[i].reserved))
+		cnt += bitmap_weight(pipe->smp_map[i].fixed, SMP_MB_CNT);
+
+		if (bitmap_empty(pipe->smp_map[i].reserved, SMP_MB_CNT)) {
+			cnt += mdss_mdp_smp_mmb_set(pipe->ftch_id + i,
+				pipe->smp_map[i].allocated);
 			continue;
+		}
+
 		mdss_mdp_smp_mmb_amend(pipe->smp_map[i].allocated,
 			pipe->smp_map[i].reserved);
 		cnt += mdss_mdp_smp_mmb_set(pipe->ftch_id + i,
@@ -307,7 +330,7 @@ int mdss_mdp_pipe_map(struct mdss_mdp_pipe *pipe)
 static struct mdss_mdp_pipe *mdss_mdp_pipe_init(struct mdss_mdp_mixer *mixer,
 						u32 type, u32 off)
 {
-	struct mdss_mdp_pipe *pipe;
+	struct mdss_mdp_pipe *pipe = NULL;
 	struct mdss_data_type *mdata;
 	struct mdss_mdp_pipe *pipe_pool = NULL;
 	u32 npipes;
@@ -481,21 +504,50 @@ int mdss_mdp_pipe_destroy(struct mdss_mdp_pipe *pipe)
 
 }
 
-static int mdss_mdp_image_setup(struct mdss_mdp_pipe *pipe)
+void mdss_mdp_crop_rect(struct mdss_mdp_img_rect *src_rect,
+	struct mdss_mdp_img_rect *dst_rect,
+	const struct mdss_mdp_img_rect *sci_rect)
+{
+	struct mdss_mdp_img_rect res;
+	mdss_mdp_intersect_rect(&res, dst_rect, sci_rect);
+
+	if (res.w && res.h) {
+		if ((res.w != dst_rect->w) || (res.h != dst_rect->h)) {
+			src_rect->x = src_rect->x + (res.x - dst_rect->x);
+			src_rect->y = src_rect->y + (res.y - dst_rect->y);
+			src_rect->w = res.w;
+			src_rect->h = res.h;
+		}
+		*dst_rect = (struct mdss_mdp_img_rect)
+			{(res.x - sci_rect->x), (res.y - sci_rect->y),
+			res.w, res.h};
+	}
+}
+
+static int mdss_mdp_image_setup(struct mdss_mdp_pipe *pipe,
+					struct mdss_mdp_data *data)
 {
 	u32 img_size, src_size, src_xy, dst_size, dst_xy, ystride0, ystride1;
 	u32 width, height;
 	u32 decimation;
+	struct mdss_mdp_img_rect sci, dst, src;
+	int ret = 0;
 
 	pr_debug("pnum=%d wh=%dx%d src={%d,%d,%d,%d} dst={%d,%d,%d,%d}\n",
-		   pipe->num, pipe->img_width, pipe->img_height,
-		   pipe->src.x, pipe->src.y, pipe->src.w, pipe->src.h,
-		   pipe->dst.x, pipe->dst.y, pipe->dst.w, pipe->dst.h);
+			pipe->num, pipe->img_width, pipe->img_height,
+			pipe->src.x, pipe->src.y, pipe->src.w, pipe->src.h,
+			pipe->dst.x, pipe->dst.y, pipe->dst.w, pipe->dst.h);
 
 	width = pipe->img_width;
 	height = pipe->img_height;
 	mdss_mdp_get_plane_sizes(pipe->src_fmt->format, width, height,
 			&pipe->src_planes, pipe->bwc_mode);
+
+	if (data != NULL) {
+		ret = mdss_mdp_data_check(data, &pipe->src_planes);
+		if (ret)
+			return ret;
+	}
 
 	if ((pipe->flags & MDP_DEINTERLACE) &&
 			!(pipe->flags & MDP_SOURCE_ROTATED_90)) {
@@ -512,15 +564,23 @@ static int mdss_mdp_image_setup(struct mdss_mdp_pipe *pipe)
 		pr_debug("Image decimation h=%d v=%d\n",
 				pipe->horz_deci, pipe->vert_deci);
 
+	sci = pipe->mixer->ctl->roi;
+	dst = pipe->dst;
+	src = pipe->src;
+
+	mdss_mdp_crop_rect(&src, &dst, &sci);
+
+	src_size = (src.h << 16) | src.w;
+	src_xy = (src.y << 16) | src.x;
+	dst_size = (dst.h << 16) | dst.w;
+	dst_xy = (dst.y << 16) | dst.x;
+
 	img_size = (height << 16) | width;
-	src_size = (pipe->src.h << 16) | pipe->src.w;
-	src_xy = (pipe->src.y << 16) | pipe->src.x;
-	dst_size = (pipe->dst.h << 16) | pipe->dst.w;
-	dst_xy = (pipe->dst.y << 16) | pipe->dst.x;
+
 	ystride0 =  (pipe->src_planes.ystride[0]) |
-		    (pipe->src_planes.ystride[1] << 16);
+			(pipe->src_planes.ystride[1] << 16);
 	ystride1 =  (pipe->src_planes.ystride[2]) |
-		    (pipe->src_planes.ystride[3] << 16);
+			(pipe->src_planes.ystride[3] << 16);
 
 	if (pipe->overfetch_disable) {
 		img_size = src_size;
@@ -661,7 +721,7 @@ static int mdss_mdp_pipe_solidfill_setup(struct mdss_mdp_pipe *pipe)
 
 	pr_debug("solid fill setup on pnum=%d\n", pipe->num);
 
-	ret = mdss_mdp_image_setup(pipe);
+	ret = mdss_mdp_image_setup(pipe, NULL);
 	if (ret) {
 		pr_err("image setup error for pnum=%d\n", pipe->num);
 		return ret;
@@ -706,7 +766,8 @@ int mdss_mdp_pipe_queue_data(struct mdss_mdp_pipe *pipe,
 	params_changed = (pipe->params_changed) ||
 			 ((pipe->type == MDSS_MDP_PIPE_TYPE_DMA) &&
 			 (pipe->mixer->type == MDSS_MDP_MIXER_TYPE_WRITEBACK)
-			 && (ctl->mdata->mixer_switched));
+			 && (ctl->mdata->mixer_switched)) ||
+			 ctl->roi_changed;
 	if (src_data == NULL) {
 		mdss_mdp_pipe_solidfill_setup(pipe);
 		goto update_nobuf;
@@ -721,7 +782,7 @@ int mdss_mdp_pipe_queue_data(struct mdss_mdp_pipe *pipe,
 			goto done;
 		}
 
-		ret = mdss_mdp_image_setup(pipe);
+		ret = mdss_mdp_image_setup(pipe, src_data);
 		if (ret) {
 			pr_err("image setup error for pnum=%d\n", pipe->num);
 			goto done;

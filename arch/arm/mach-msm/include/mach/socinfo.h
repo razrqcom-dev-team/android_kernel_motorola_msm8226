@@ -46,12 +46,16 @@
 #define of_board_is_skuf()	of_machine_is_compatible("qcom,skuf")
 
 #define platform_is_msm8226_moto()	of_machine_is_compatible("qcom,msm8226-moto")
+#define platform_is_msm8610_moto()	of_machine_is_compatible("qcom,msm8610-moto")
 
 #define machine_is_msm8974()	of_machine_is_compatible("qcom,msm8974")
 #define machine_is_msm9625()	of_machine_is_compatible("qcom,msm9625")
 #define machine_is_msm8610()	of_machine_is_compatible("qcom,msm8610")
 #define machine_is_msm8226()	of_machine_is_compatible("qcom,msm8226")
 #define machine_is_apq8074()	of_machine_is_compatible("qcom,apq8074")
+#define machine_is_msm8926()	of_machine_is_compatible("qcom,msm8926")
+
+#define platform_is_msm8974_moto()	of_machine_is_compatible("qcom,msm8974-moto")
 
 #define early_machine_is_msm8610()	\
 	of_flat_dt_is_compatible(of_get_flat_dt_root(), "qcom,msm8610")
@@ -84,6 +88,9 @@
 #define machine_is_msm8610()		0
 #define machine_is_msm8226()		0
 #define machine_is_apq8074()		0
+#define machine_is_msm8926()		0
+
+#define platform_is_msm8974_moto()	0
 
 #define early_machine_is_msm8610()	0
 #define early_machine_is_mpq8092()	0

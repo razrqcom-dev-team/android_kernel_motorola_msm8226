@@ -97,8 +97,6 @@ MODULE_PARM_DESC(spkr_drv_wrnd,
 #define TAPAN_SLIM_IRQ_UNDERFLOW (1 << 1)
 #define TAPAN_SLIM_IRQ_PORT_CLOSED (1 << 2)
 
-#define TAPAN_IRQ_MBHC_JACK_SWITCH 21
-
 enum tapan_codec_type {
 	WCD9306,
 	WCD9302,
@@ -1080,6 +1078,32 @@ static const struct soc_enum class_h_dsm_enum =
 static const struct snd_kcontrol_new class_h_dsm_mux =
 	SOC_DAPM_ENUM("CLASS_H_DSM MUX Mux", class_h_dsm_enum);
 
+static int tapan_hph_impedance_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	uint32_t zl, zr;
+	bool hphr;
+	struct soc_multi_mixer_control *mc;
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct tapan_priv *priv = snd_soc_codec_get_drvdata(codec);
+
+	mc = (struct soc_multi_mixer_control *)(kcontrol->private_value);
+
+	hphr = mc->shift;
+
+	pr_debug("%s: tapan_priv: %p\n", __func__, priv);
+
+#ifndef CONFIG_SND_SOC_TPA6165A2
+	wcd9xxx_mbhc_get_impedance(&priv->mbhc, &zl, &zr);
+	pr_debug("%s: zl %u, zr %u\n", __func__, zl, zr);
+#else
+	zr = zl = 0;
+#endif
+	ucontrol->value.integer.value[0] = hphr ? zr : zl;
+
+	return 0;
+}
+
 static const struct snd_kcontrol_new tapan_common_snd_controls[] = {
 
 	SOC_ENUM_EXT("EAR PA Gain", tapan_ear_pa_gain_enum[0],
@@ -1182,6 +1206,11 @@ static const struct snd_kcontrol_new tapan_common_snd_controls[] = {
 	tapan_get_iir_band_audio_mixer, tapan_put_iir_band_audio_mixer),
 	SOC_SINGLE_MULTI_EXT("IIR2 Band5", IIR2, BAND5, 255, 0, 5,
 	tapan_get_iir_band_audio_mixer, tapan_put_iir_band_audio_mixer),
+
+	SOC_SINGLE_EXT("HPHL Impedance", 0, 0, UINT_MAX, 0,
+		       tapan_hph_impedance_get, NULL),
+	SOC_SINGLE_EXT("HPHR Impedance", 0, 1, UINT_MAX, 0,
+		       tapan_hph_impedance_get, NULL),
 };
 
 static const struct snd_kcontrol_new tapan_9306_snd_controls[] = {
@@ -2842,7 +2871,7 @@ static const struct snd_soc_dapm_route audio_map[] = {
 
 	{"DAC1", "Switch", "CLASS_H_DSM MUX"},
 	{"HPHL DAC", "Switch", "CLASS_H_DSM MUX"},
-	{"HPHR DAC", NULL, "RX2 CHAIN"},
+	{"HPHR DAC", NULL, "RDAC3 MUX"},
 
 	{"LINEOUT1", NULL, "LINEOUT1 PA"},
 	{"LINEOUT2", NULL, "LINEOUT2 PA"},
@@ -2853,10 +2882,13 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"LINEOUT2 PA", NULL, "LINEOUT2_PA_MIXER"},
 	{"LINEOUT2_PA_MIXER", NULL, "LINEOUT2 DAC"},
 
-	{"LINEOUT1 DAC", NULL, "RX3 MIX1"},
 
 	{"RDAC5 MUX", "DEM3_INV", "RX3 MIX1"},
 	{"LINEOUT2 DAC", NULL, "RDAC5 MUX"},
+
+	{"RDAC4 MUX", "DEM3", "RX3 MIX1"},
+	{"RDAC4 MUX", "DEM2", "RX2 CHAIN"},
+	{"LINEOUT1 DAC", NULL, "RDAC4 MUX"},
 
 	{"SPK PA", NULL, "SPK DAC"},
 	{"SPK DAC", NULL, "VDD_SPKDRV"},
@@ -2870,7 +2902,7 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"LINEOUT1 DAC", NULL, "CDC_CP_VDD"},
 	{"LINEOUT2 DAC", NULL, "CDC_CP_VDD"},
 
-	{"RDAC3 MUX", "DEM2", "RX2 MIX1"},
+	{"RDAC3 MUX", "DEM2", "RX2 CHAIN"},
 	{"RDAC3 MUX", "DEM1", "RX1 CHAIN"},
 
 	{"RX1 MIX1", NULL, "RX1 MIX1 INP1"},
@@ -3005,9 +3037,6 @@ static const struct snd_soc_dapm_route audio_map[] = {
 static const struct snd_soc_dapm_route wcd9302_map[] = {
 	{"SPK DAC", "Switch", "RX3 MIX1"},
 
-	{"RDAC4 MUX", "DEM3", "RX3 MIX1"},
-	{"RDAC4 MUX", "DEM2", "RX2 CHAIN"},
-	{"LINEOUT1 DAC", NULL, "RDAC4 MUX"},
 
 	{"RDAC5 MUX", "DEM4", "RX3 MIX1"},
 	{"RDAC5 MUX", "DEM3_INV", "RDAC4 MUX"},
@@ -4621,6 +4650,9 @@ static int tapan_handle_pdata(struct tapan_priv *tapan)
 	u8 flag = pdata->amic_settings.use_pdata;
 	u8 i = 0, j = 0;
 	u8 val_txfe = 0, value = 0;
+	u8 dmic_sample_rate_value = 0;
+	u8 dmic_b1_ctl_value = 0;
+	u8 anc_ctl_value = 0;
 
 	if (!pdata) {
 		dev_err(codec->dev, "%s: NULL pdata\n", __func__);
@@ -4713,6 +4745,78 @@ static int tapan_handle_pdata(struct tapan_priv *tapan)
 	value = (pdata->micbias.bias3_cap_mode == MICBIAS_EXT_BYP_CAP ?
 		 0x00 : 0x10);
 	snd_soc_update_bits(codec, TAPAN_A_MICB_3_CTL, 0x10, value);
+
+	/* Set the DMIC sample rate */
+	if (pdata->mclk_rate == TAPAN_MCLK_CLK_9P6MHZ) {
+		switch (pdata->dmic_sample_rate) {
+		case WCD9XXX_DMIC_SAMPLE_RATE_2P4MHZ:
+			dmic_sample_rate_value = WCD9XXX_DMIC_SAMPLE_RATE_DIV_4;
+			dmic_b1_ctl_value = WCD9XXX_DMIC_B1_CTL_DIV_4;
+			anc_ctl_value = WCD9XXX_ANC_DMIC_X2_OFF;
+			break;
+		case WCD9XXX_DMIC_SAMPLE_RATE_4P8MHZ:
+			dmic_sample_rate_value = WCD9XXX_DMIC_SAMPLE_RATE_DIV_2;
+			dmic_b1_ctl_value = WCD9XXX_DMIC_B1_CTL_DIV_2;
+			anc_ctl_value = WCD9XXX_ANC_DMIC_X2_ON;
+			break;
+		case WCD9XXX_DMIC_SAMPLE_RATE_3P2MHZ:
+		case WCD9XXX_DMIC_SAMPLE_RATE_UNDEFINED:
+			dmic_sample_rate_value = WCD9XXX_DMIC_SAMPLE_RATE_DIV_3;
+			dmic_b1_ctl_value = WCD9XXX_DMIC_B1_CTL_DIV_3;
+			anc_ctl_value = WCD9XXX_ANC_DMIC_X2_OFF;
+			break;
+		default:
+			dev_err(codec->dev,
+				"%s Invalid sample rate %d for mclk %d\n",
+				__func__, pdata->dmic_sample_rate,
+				pdata->mclk_rate);
+			rc = -EINVAL;
+			goto done;
+		}
+	} else if (pdata->mclk_rate == TAPAN_MCLK_CLK_12P288MHZ) {
+		switch (pdata->dmic_sample_rate) {
+		case WCD9XXX_DMIC_SAMPLE_RATE_3P072MHZ:
+			dmic_sample_rate_value = WCD9XXX_DMIC_SAMPLE_RATE_DIV_4;
+			dmic_b1_ctl_value = WCD9XXX_DMIC_B1_CTL_DIV_4;
+			anc_ctl_value = WCD9XXX_ANC_DMIC_X2_OFF;
+			break;
+		case WCD9XXX_DMIC_SAMPLE_RATE_6P144MHZ:
+			dmic_sample_rate_value = WCD9XXX_DMIC_SAMPLE_RATE_DIV_2;
+			dmic_b1_ctl_value = WCD9XXX_DMIC_B1_CTL_DIV_2;
+			anc_ctl_value = WCD9XXX_ANC_DMIC_X2_ON;
+			break;
+		case WCD9XXX_DMIC_SAMPLE_RATE_4P096MHZ:
+		case WCD9XXX_DMIC_SAMPLE_RATE_UNDEFINED:
+			dmic_sample_rate_value = WCD9XXX_DMIC_SAMPLE_RATE_DIV_3;
+			dmic_b1_ctl_value = WCD9XXX_DMIC_B1_CTL_DIV_3;
+			anc_ctl_value = WCD9XXX_ANC_DMIC_X2_OFF;
+			break;
+		default:
+			dev_err(codec->dev,
+				"%s Invalid sample rate %d for mclk %d\n",
+				__func__, pdata->dmic_sample_rate,
+				pdata->mclk_rate);
+			rc = -EINVAL;
+			goto done;
+		}
+	} else {
+		dev_err(codec->dev, "%s MCLK is not set!\n", __func__);
+		rc = -EINVAL;
+		goto done;
+	}
+
+	snd_soc_update_bits(codec, TAPAN_A_CDC_TX1_DMIC_CTL,
+		0x7, dmic_sample_rate_value);
+	snd_soc_update_bits(codec, TAPAN_A_CDC_TX2_DMIC_CTL,
+		0x7, dmic_sample_rate_value);
+	snd_soc_update_bits(codec, TAPAN_A_CDC_TX3_DMIC_CTL,
+		0x7, dmic_sample_rate_value);
+	snd_soc_update_bits(codec, TAPAN_A_CDC_TX4_DMIC_CTL,
+		0x7, dmic_sample_rate_value);
+	snd_soc_update_bits(codec, TAPAN_A_CDC_CLK_DMIC_B1_CTL,
+		0xEE, dmic_b1_ctl_value);
+	snd_soc_update_bits(codec, TAPAN_A_CDC_ANC1_B2_CTL,
+		0x1, anc_ctl_value);
 
 done:
 	return rc;
@@ -4907,15 +5011,6 @@ static const struct tapan_reg_mask_val tapan_codec_reg_init_val[] = {
 	{TAPAN_A_CDC_TX3_MUX_CTL, 0x8, 0x0},
 	{TAPAN_A_CDC_TX4_MUX_CTL, 0x8, 0x0},
 
-	/* config Decimator for DMIC CLK_MODE_1(3.2Mhz@9.6Mhz mclk) */
-	{TAPAN_A_CDC_TX1_DMIC_CTL, 0x7, 0x1},
-	{TAPAN_A_CDC_TX2_DMIC_CTL, 0x7, 0x1},
-	{TAPAN_A_CDC_TX3_DMIC_CTL, 0x7, 0x1},
-	{TAPAN_A_CDC_TX4_DMIC_CTL, 0x7, 0x1},
-
-	/* config DMIC clk to CLK_MODE_1 (3.2Mhz@9.6Mhz mclk) */
-	{TAPAN_A_CDC_CLK_DMIC_B1_CTL, 0xEE, 0x22},
-
 	/* Compander zone selection */
 	{TAPAN_A_CDC_COMP0_B4_CTL, 0x3F, 0x37},
 	{TAPAN_A_CDC_COMP1_B4_CTL, 0x3F, 0x37},
@@ -5041,11 +5136,6 @@ static void tapan_codec_specific_cal_setup(struct snd_soc_codec *codec,
 	snd_soc_update_bits(codec, WCD9XXX_A_TX_7_MBHC_EN, 0xE0, 0xE0);
 }
 
-static int tapan_get_jack_detect_irq(struct snd_soc_codec *codec)
-{
-	return TAPAN_IRQ_MBHC_JACK_SWITCH;
-}
-
 static struct wcd9xxx_cfilt_mode tapan_codec_switch_cfilt_mode(
 				 struct wcd9xxx_mbhc *mbhc,
 				 bool fast)
@@ -5069,14 +5159,6 @@ static void tapan_select_cfilt(struct snd_soc_codec *codec,
 			       struct wcd9xxx_mbhc *mbhc)
 {
 	snd_soc_update_bits(codec, mbhc->mbhc_bias_regs.ctl_reg, 0x60, 0x00);
-}
-
-static void tapan_free_irq(struct wcd9xxx_mbhc *mbhc)
-{
-	struct wcd9xxx *wcd9xxx = mbhc->codec->control_data;
-	struct wcd9xxx_core_resource *core_res =
-			&wcd9xxx->core_res;
-	wcd9xxx_free_irq(core_res, WCD9306_IRQ_MBHC_JACK_SWITCH, mbhc);
 }
 
 enum wcd9xxx_cdc_type tapan_get_cdc_type(void)
@@ -5337,10 +5419,8 @@ static const struct wcd9xxx_mbhc_cb mbhc_cb = {
 	.enable_mux_bias_block = tapan_enable_mux_bias_block,
 	.cfilt_fast_mode = tapan_put_cfilt_fast_mode,
 	.codec_specific_cal = tapan_codec_specific_cal_setup,
-	.jack_detect_irq = tapan_get_jack_detect_irq,
 	.switch_cfilt_mode = tapan_codec_switch_cfilt_mode,
 	.select_cfilt = tapan_select_cfilt,
-	.free_irq = tapan_free_irq,
 	.get_cdc_type = tapan_get_cdc_type,
 	.setup_zdet = tapan_setup_zdet,
 	.compute_impedance = tapan_compute_impedance,
@@ -5380,6 +5460,18 @@ static int tapan_device_down(struct wcd9xxx *wcd9xxx)
 
 	return 0;
 }
+
+static const struct wcd9xxx_mbhc_intr cdc_intr_ids = {
+	.poll_plug_rem = WCD9XXX_IRQ_MBHC_REMOVAL,
+	.shortavg_complete = WCD9XXX_IRQ_MBHC_SHORT_TERM,
+	.potential_button_press = WCD9XXX_IRQ_MBHC_PRESS,
+	.button_release = WCD9XXX_IRQ_MBHC_RELEASE,
+	.dce_est_complete = WCD9XXX_IRQ_MBHC_POTENTIAL,
+	.insertion = WCD9XXX_IRQ_MBHC_INSERTION,
+	.hph_left_ocp = WCD9306_IRQ_HPH_PA_OCPL_FAULT,
+	.hph_right_ocp = WCD9306_IRQ_HPH_PA_OCPR_FAULT,
+	.hs_jack_switch = WCD9306_IRQ_MBHC_JACK_SWITCH,
+};
 
 static int tapan_post_reset_cb(struct wcd9xxx *wcd9xxx)
 {
@@ -5431,7 +5523,7 @@ static int tapan_post_reset_cb(struct wcd9xxx *wcd9xxx)
 		rco_clk_rate = TAPAN_MCLK_CLK_9P6MHZ;
 
 	ret = wcd9xxx_mbhc_init(&tapan->mbhc, &tapan->resmgr, codec, NULL,
-				&mbhc_cb, rco_clk_rate,
+				&mbhc_cb, &cdc_intr_ids, rco_clk_rate,
 				TAPAN_CDC_ZDET_SUPPORTED);
 	if (ret)
 		pr_err("%s: mbhc init failed %d\n", __func__, ret);
@@ -5611,7 +5703,8 @@ static int tapan_codec_probe(struct snd_soc_codec *codec)
 	core_res = &wcd9xxx->core_res;
 	pdata = dev_get_platdata(codec->dev->parent);
 	ret = wcd9xxx_resmgr_init(&tapan->resmgr, codec, core_res, pdata,
-				  &tapan_reg_address, WCD9XXX_CDC_TYPE_TAPAN);
+				  &pdata->micbias, &tapan_reg_address,
+				  WCD9XXX_CDC_TYPE_TAPAN);
 	if (ret) {
 		pr_err("%s: wcd9xxx init failed %d\n", __func__, ret);
 		return ret;
@@ -5639,7 +5732,7 @@ static int tapan_codec_probe(struct snd_soc_codec *codec)
 
 #ifndef CONFIG_SND_SOC_TPA6165A2
 	ret = wcd9xxx_mbhc_init(&tapan->mbhc, &tapan->resmgr, codec, NULL,
-				&mbhc_cb, rco_clk_rate,
+				&mbhc_cb, &cdc_intr_ids, rco_clk_rate,
 				TAPAN_CDC_ZDET_SUPPORTED);
 
 	if (ret) {

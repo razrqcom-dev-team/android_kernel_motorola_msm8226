@@ -396,6 +396,18 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 									ret);
 		}
 	}
+	ret = snd_pcm_hw_constraint_step(runtime, 0,
+		SNDRV_PCM_HW_PARAM_PERIOD_BYTES, 32);
+	if (ret < 0) {
+		pr_err("constraint for period bytes step ret = %d\n",
+								ret);
+	}
+	ret = snd_pcm_hw_constraint_step(runtime, 0,
+		SNDRV_PCM_HW_PARAM_BUFFER_BYTES, 32);
+	if (ret < 0) {
+		pr_err("constraint for buffer bytes step ret = %d\n",
+								ret);
+	}
 
 	prtd->dsp_cnt = 0;
 	prtd->set_channel_map = false;
@@ -435,10 +447,7 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 
 	data = q6asm_is_cpu_buf_avail(IN, prtd->audio_client, &size, &idx);
 	if (size < fbytes) {
-		pr_err("%s: size mismatch error size %d fbytes %d\n",
-		__func__ , size , fbytes);
-		ret = -EFAULT;
-		goto fail;
+		fbytes = size;
 	}
 	bufptr = data;
 	if (bufptr) {

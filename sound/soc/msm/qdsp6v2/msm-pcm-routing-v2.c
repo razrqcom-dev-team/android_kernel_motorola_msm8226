@@ -1344,7 +1344,7 @@ static int msm_routing_ec_ref_rx_put(struct snd_kcontrol *kcontrol,
 		break;
 	case 1:
 		msm_route_ec_ref_rx = 1;
-		ec_ref_port_id = PRIMARY_I2S_RX;
+		ec_ref_port_id = AFE_PORT_ID_PRIMARY_MI2S_RX;
 		break;
 	default:
 		msm_route_ec_ref_rx = 3; /* NONE */
@@ -1640,6 +1640,9 @@ static const struct snd_kcontrol_new incall_music_delivery_mixer_controls[] = {
 	SOC_SINGLE_EXT("MultiMedia2", MSM_BACKEND_DAI_VOICE_PLAYBACK_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA2, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
+	SOC_SINGLE_EXT("MultiMedia5", MSM_BACKEND_DAI_VOICE_PLAYBACK_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
 	SOC_SINGLE_EXT("MultiMedia9", MSM_BACKEND_DAI_VOICE_PLAYBACK_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA9, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
@@ -1651,6 +1654,9 @@ static const struct snd_kcontrol_new incall_music2_delivery_mixer_controls[] = {
 	msm_routing_put_audio_mixer),
 	SOC_SINGLE_EXT("MultiMedia2", MSM_BACKEND_DAI_VOICE2_PLAYBACK_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA2, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+	SOC_SINGLE_EXT("MultiMedia5", MSM_BACKEND_DAI_VOICE2_PLAYBACK_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
 	SOC_SINGLE_EXT("MultiMedia9", MSM_BACKEND_DAI_VOICE2_PLAYBACK_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA9, 1, 0, msm_routing_get_audio_mixer,
@@ -1881,6 +1887,21 @@ static const struct snd_kcontrol_new mmul4_mixer_controls[] = {
 	MSM_FRONTEND_DAI_MULTIMEDIA4, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
 	SOC_SINGLE_EXT("PRI_MI2S_TX", MSM_BACKEND_DAI_PRI_MI2S_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA4, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+	SOC_SINGLE_EXT("INTERNAL_FM_TX", MSM_BACKEND_DAI_INT_FM_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA4, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+	SOC_SINGLE_EXT("INTERNAL_BT_SCO_TX", MSM_BACKEND_DAI_INT_BT_SCO_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA4, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+	SOC_SINGLE_EXT("AFE_PCM_TX", MSM_BACKEND_DAI_AFE_PCM_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA4, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+	SOC_SINGLE_EXT("VOC_REC_DL", MSM_BACKEND_DAI_INCALL_RECORD_RX,
+	MSM_FRONTEND_DAI_MULTIMEDIA4, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+	SOC_SINGLE_EXT("VOC_REC_UL", MSM_BACKEND_DAI_INCALL_RECORD_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA4, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
 };
@@ -3290,10 +3311,12 @@ static const struct snd_soc_dapm_route intercon[] = {
 		/* incall */
 	{"Incall_Music Audio Mixer", "MultiMedia1", "MM_DL1"},
 	{"Incall_Music Audio Mixer", "MultiMedia2", "MM_DL2"},
+	{"Incall_Music Audio Mixer", "MultiMedia5", "MM_DL5"},
 	{"Incall_Music Audio Mixer", "MultiMedia9", "MM_DL9"},
 	{"VOICE_PLAYBACK_TX", NULL, "Incall_Music Audio Mixer"},
 	{"Incall_Music_2 Audio Mixer", "MultiMedia1", "MM_DL1"},
 	{"Incall_Music_2 Audio Mixer", "MultiMedia2", "MM_DL2"},
+	{"Incall_Music_2 Audio Mixer", "MultiMedia5", "MM_DL5"},
 	{"Incall_Music_2 Audio Mixer", "MultiMedia9", "MM_DL9"},
 	{"VOICE2_PLAYBACK_TX", NULL, "Incall_Music_2 Audio Mixer"},
 	{"SLIMBUS_4_RX Audio Mixer", "MultiMedia1", "MM_DL1"},
@@ -3301,7 +3324,9 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"SLIMBUS_4_RX", NULL, "SLIMBUS_4_RX Audio Mixer"},
 
 	{"MultiMedia1 Mixer", "VOC_REC_UL", "INCALL_RECORD_TX"},
+	{"MultiMedia4 Mixer", "VOC_REC_UL", "INCALL_RECORD_TX"},
 	{"MultiMedia1 Mixer", "VOC_REC_DL", "INCALL_RECORD_RX"},
+	{"MultiMedia4 Mixer", "VOC_REC_DL", "INCALL_RECORD_RX"},
 	{"MultiMedia1 Mixer", "SLIM_4_TX", "SLIMBUS_4_TX"},
 	{"MultiMedia4 Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"},
 	{"MultiMedia4 Mixer", "PRI_MI2S_TX", "PRI_MI2S_TX"},
@@ -3396,11 +3421,14 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"PCM_RX", NULL, "AFE_PCM_RX Audio Mixer"},
 
 	{"MultiMedia1 Mixer", "INTERNAL_BT_SCO_TX", "INT_BT_SCO_TX"},
+	{"MultiMedia4 Mixer", "INTERNAL_BT_SCO_TX", "INT_BT_SCO_TX"},
 	{"MultiMedia5 Mixer", "INTERNAL_BT_SCO_TX", "INT_BT_SCO_TX"},
 	{"MultiMedia1 Mixer", "INTERNAL_FM_TX", "INT_FM_TX"},
+	{"MultiMedia4 Mixer", "INTERNAL_FM_TX", "INT_FM_TX"},
 	{"MultiMedia5 Mixer", "INTERNAL_FM_TX", "INT_FM_TX"},
 
 	{"MultiMedia1 Mixer", "AFE_PCM_TX", "PCM_TX"},
+	{"MultiMedia4 Mixer", "AFE_PCM_TX", "PCM_TX"},
 	{"MultiMedia5 Mixer", "AFE_PCM_TX", "PCM_TX"},
 	{"MM_UL1", NULL, "MultiMedia1 Mixer"},
 	{"MultiMedia2 Mixer", "INTERNAL_FM_TX", "INT_FM_TX"},
@@ -3721,6 +3749,86 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"SLIMBUS_0_RX", NULL, "SLIM0_RX_VI_FB_LCH_MUX"},
 };
 
+#if defined(CONFIG_SND_SOC_WM5110) && defined(CONFIG_SND_SOC_TFA9890)
+static int tfa9890_wm5110_active;
+
+static int msm_tfa9890_routing_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = tfa9890_wm5110_active;
+
+	return 0;
+}
+
+static int msm_tfa9890_routing_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dapm_widget_list *wlist = snd_kcontrol_chip(kcontrol);
+	struct snd_soc_dapm_widget *widget = wlist->widgets[0];
+
+	if (ucontrol->value.integer.value[0])
+		snd_soc_dapm_mixer_update_power(widget, kcontrol, 1);
+	else
+		snd_soc_dapm_mixer_update_power(widget, kcontrol, 0);
+
+	tfa9890_wm5110_active = ucontrol->value.integer.value[0];
+
+	return 1;
+}
+
+static const struct snd_kcontrol_new tfa9890_rx_mixer_controls[] = {
+	SOC_SINGLE_EXT("TFA9890_LEFT", 0,
+		0, 1, 0, msm_tfa9890_routing_get, msm_tfa9890_routing_put),
+	SOC_SINGLE_EXT("TFA9890_RIGHT", 0,
+		0, 1, 0, msm_tfa9890_routing_get, msm_tfa9890_routing_put),
+};
+
+/* platform widgets to help with tfa9890<->wm5110 (codec-codec) linking
+ * and to trigger tfa9890 BE DAI, when playback streams are started.
+*/
+static const struct snd_soc_dapm_widget msm8974_wm5110_tfa9890_widgets[] = {
+	SND_SOC_DAPM_AIF_OUT("TFA9890_WM5110_RXL",
+			"codec-codec link left Playback",
+			0, 0, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("TFA9890_WM5110_RXR",
+			"codec-codec link right Playback",
+			0, 0, 0, 0),
+	SND_SOC_DAPM_MIXER("TFA9890_WM5110_RX Mixer", SND_SOC_NOPM, 0, 0,
+			tfa9890_rx_mixer_controls,
+			ARRAY_SIZE(tfa9890_rx_mixer_controls)),
+};
+
+static const struct snd_soc_dapm_route wm5110_tfa9890_routes[] = {
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "MM_DL1"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "MM_DL2"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "MM_DL3"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "MM_DL4"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "MM_DL5"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "MM_DL6"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "MM_DL7"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "MM_DL8"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "VOIP_DL"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "CS-VOICE_DL1"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "VOICE2_DL"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_LEFT", "VoLTE_DL"},
+	{ "TFA9890_WM5110_RXL", NULL, "TFA9890_WM5110_RX Mixer"},
+
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "MM_DL1"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "MM_DL2"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "MM_DL3"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "MM_DL4"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "MM_DL5"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "MM_DL6"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "MM_DL7"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "MM_DL8"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "VOIP_DL"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "CS-VOICE_DL1"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "VOICE2_DL"},
+	{ "TFA9890_WM5110_RX Mixer", "TFA9890_RIGHT", "VoLTE_DL"},
+	{ "TFA9890_WM5110_RXR", NULL, "TFA9890_WM5110_RX Mixer"},
+};
+#endif
+
 static int msm_pcm_routing_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
 {
@@ -3895,6 +4003,16 @@ static int msm_routing_probe(struct snd_soc_platform *platform)
 			   ARRAY_SIZE(msm_qdsp6_widgets));
 	snd_soc_dapm_add_routes(&platform->dapm, intercon,
 		ARRAY_SIZE(intercon));
+
+#if defined(CONFIG_SND_SOC_WM5110) && defined(CONFIG_SND_SOC_TFA9890)
+	snd_soc_dapm_new_controls(&platform->dapm,
+				msm8974_wm5110_tfa9890_widgets,
+				ARRAY_SIZE(msm8974_wm5110_tfa9890_widgets));
+
+	snd_soc_dapm_add_routes(&platform->dapm,
+				wm5110_tfa9890_routes,
+				ARRAY_SIZE(wm5110_tfa9890_routes));
+#endif
 
 	snd_soc_dapm_new_widgets(&platform->dapm);
 

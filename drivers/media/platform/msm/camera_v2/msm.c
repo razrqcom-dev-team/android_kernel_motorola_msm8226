@@ -438,7 +438,7 @@ static inline int __msm_sd_close_subdevs(struct msm_sd_subdev *msm_sd,
 static inline int __msm_destroy_session_streams(void *d1, void *d2)
 {
 	struct msm_stream *stream = d1;
-
+	pr_err("%s: Destroyed here due to list is not empty\n", __func__);
 	INIT_LIST_HEAD(&stream->queued_list);
 	return 0;
 }
@@ -681,14 +681,16 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 	}
 
 	/* should wait on session based condition */
-	wait_count = 2;
+	wait_count = 5;
 	do {
 		rc = wait_event_interruptible_timeout(cmd_ack->wait,
 			!list_empty_careful(&cmd_ack->command_q.list),
 			msecs_to_jiffies(timeout));
-		wait_count--;
 		if (rc != -ERESTARTSYS)
 			break;
+		else
+			pr_info("%s: signal interruption, retry", __func__);
+		wait_count--;
 	} while (wait_count > 0);
 
 	if (list_empty_careful(&cmd_ack->command_q.list)) {

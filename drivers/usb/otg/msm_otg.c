@@ -889,6 +889,7 @@ static int msm_otg_suspend(struct msm_otg *motg)
 	if (motg->pdata->delay_lpm_hndshk_on_disconnect && !msm_bam_lpm_ok())
 		return -EBUSY;
 
+	motg->ui_enabled = 0;
 	disable_irq(motg->irq);
 	host_bus_suspend = !test_bit(MHL, &motg->inputs) && phy->otg->host &&
 		!test_bit(ID, &motg->inputs);
@@ -919,6 +920,7 @@ static int msm_otg_suspend(struct msm_otg *motg)
 	if ((test_bit(B_SESS_VLD, &motg->inputs) && !device_bus_suspend &&
 		!dcp && !prop_charger && !floated_charger) ||
 		test_bit(A_BUS_REQ, &motg->inputs)) {
+		motg->ui_enabled = 1;
 		enable_irq(motg->irq);
 		return -EBUSY;
 	}
@@ -977,6 +979,7 @@ static int msm_otg_suspend(struct msm_otg *motg)
 	if (cnt >= PHY_SUSPEND_TIMEOUT_USEC) {
 		dev_err(phy->dev, "Unable to suspend PHY\n");
 		msm_otg_reset(phy);
+		motg->ui_enabled = 1;
 		enable_irq(motg->irq);
 		return -ETIMEDOUT;
 	}
@@ -1093,7 +1096,12 @@ static int msm_otg_suspend(struct msm_otg *motg)
 	/* Enable ASYNC IRQ (if present) during LPM */
 	if (motg->async_irq)
 		enable_irq(motg->async_irq);
-	enable_irq(motg->irq);
+
+	/* XO shutdown during idle , non wakeable irqs must be disabled */
+	if (device_bus_suspend || host_bus_suspend || !motg->async_irq) {
+		motg->ui_enabled = 1;
+		enable_irq(motg->irq);
+	}
 	wake_unlock(&motg->wlock);
 
 	dev_info(phy->dev, "USB in low power mode\n");
@@ -1117,7 +1125,10 @@ static int msm_otg_resume(struct msm_otg *motg)
 	if (motg->pdata->delay_lpm_hndshk_on_disconnect)
 		msm_bam_notify_lpm_resume();
 
-	disable_irq(motg->irq);
+	if (motg->ui_enabled) {
+		motg->ui_enabled = 0;
+		disable_irq(motg->irq);
+	}
 	wake_lock(&motg->wlock);
 
 	/* Some platforms require BUS vote to enable/disable clocks */
@@ -1222,6 +1233,7 @@ skip_phy_resume:
 		enable_irq(motg->async_int);
 		motg->async_int = 0;
 	}
+	motg->ui_enabled = 1;
 	enable_irq(motg->irq);
 
 	/* If ASYNC IRQ is present then keep it enabled only during LPM */
@@ -2569,14 +2581,17 @@ static void msm_otg_sm_work(struct work_struct *w)
 							&motg->ext_chg_wait);
 						motg->ext_chg_active = true;
 					}
-					/* fall through */
+					msm_otg_notify_charger(motg,
+							       IDEV_CHG_DCP);
+					pm_runtime_put_sync(otg->phy->dev);
+					break;
 				case USB_PROPRIETARY_CHARGER:
 					if (ta_charger_detected)
 						msm_otg_notify_charger(motg,
 								IDEV_CHG_TA);
 					else
 						msm_otg_notify_charger(motg,
-								IDEV_CHG_MAX);
+								IDEV_CHG_PROP);
 					pm_runtime_put_sync(otg->phy->dev);
 					break;
 				case USB_FLOATED_CHARGER:
@@ -3695,6 +3710,9 @@ static int otg_power_get_property_usb(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_TYPE:
 		val->intval = psy->type;
 		break;
+	case POWER_SUPPLY_PROP_HEALTH:
+		val->intval = motg->usbin_health;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -3725,6 +3743,9 @@ static int otg_power_set_property_usb(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_TYPE:
 		psy->type = val->intval;
 		break;
+	case POWER_SUPPLY_PROP_HEALTH:
+		motg->usbin_health = val->intval;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -3737,6 +3758,7 @@ static int otg_power_property_is_writeable_usb(struct power_supply *psy,
 						enum power_supply_property psp)
 {
 	switch (psp) {
+	case POWER_SUPPLY_PROP_HEALTH:
 	case POWER_SUPPLY_PROP_PRESENT:
 	case POWER_SUPPLY_PROP_ONLINE:
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
@@ -3754,6 +3776,7 @@ static char *otg_pm_power_supplied_to[] = {
 };
 
 static enum power_supply_property otg_pm_power_props_usb[] = {
+	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX,

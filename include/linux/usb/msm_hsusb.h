@@ -103,6 +103,8 @@ enum msm_usb_phy_type {
 };
 
 #define IDEV_CHG_MAX	1500
+#define IDEV_CHG_DCP    1300
+#define IDEV_CHG_PROP   1200
 #define IDEV_CHG_TA	1100
 #define IDEV_CHG_MIN	500
 #define IUNIT		100
@@ -348,6 +350,7 @@ struct msm_otg_platform_data {
  * @host_bus_suspend: indicates host bus suspend or not.
  * @chg_check_timer: The timer used to implement the workaround to detect
  *               very slow plug in of wall charger.
+ * @ui_enabled: USB Intterupt is enabled or disabled.
  */
 struct msm_otg {
 	struct usb_phy phy;
@@ -449,6 +452,7 @@ struct msm_otg {
 	unsigned int host_mode;
 	unsigned int voltage_max;
 	unsigned int current_max;
+	unsigned int usbin_health;
 
 	dev_t ext_chg_dev;
 	struct cdev ext_chg_cdev;
@@ -457,6 +461,7 @@ struct msm_otg {
 	bool ext_chg_opened;
 	bool ext_chg_active;
 	struct completion ext_chg_wait;
+	int ui_enabled;
 };
 
 struct ci13xxx_platform_data {

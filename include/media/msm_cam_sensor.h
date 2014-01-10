@@ -48,6 +48,12 @@
 
 #define MAX_AF_ITERATIONS 3
 
+enum flash_type {
+	LED_FLASH = 1,
+	STROBE_FLASH,
+	GPIO_FLASH
+};
+
 enum msm_camera_i2c_reg_addr_type {
 	MSM_CAMERA_I2C_BYTE_ADDR = 1,
 	MSM_CAMERA_I2C_WORD_ADDR,
@@ -262,6 +268,7 @@ struct msm_camera_sensor_slave_info {
 struct msm_camera_i2c_reg_array {
 	uint16_t reg_addr;
 	uint16_t reg_data;
+	uint32_t delay;
 };
 
 struct msm_camera_i2c_reg_setting {

@@ -194,8 +194,6 @@ struct dsi_clk_desc {
 
 #define MDSS_DSI_LEN 8 /* 4 x 4 - 6 - 2, bytes dcs header+crc-align  */
 
-#define MDSS_DSI_RST_SEQ_LEN 6
-
 struct dsi_buf {
 	u32 *hdr;	/* dsi host header */
 	char *start;	/* buffer start addr */
@@ -245,6 +243,9 @@ struct dsi_buf {
 #define DTYPE_DCS_READ1_RESP    0x21    /* 1 parameter, short */
 #define DTYPE_DCS_READ2_RESP    0x22    /* 2 parameter, short */
 
+#define DSI_MODE_BIT_HS 0
+#define DSI_MODE_BIT_LP 1
+
 
 struct dsi_ctrl_hdr {
 	char dtype;	/* data type */
@@ -270,8 +271,6 @@ struct dsi_panel_cmds {
 
 #define CMD_REQ_MAX     4
 
-typedef void (*fxn)(u32 data);
-
 #define CMD_REQ_RX      0x0001
 #define CMD_REQ_COMMIT  0x0002
 #define CMD_CLK_CTRL    0x0004
@@ -282,8 +281,8 @@ struct dcs_cmd_req {
 	int cmds_cnt;
 	u32 flags;
 	int rlen;       /* rx length */
-	fxn cb;
-	char *rdata;
+	char *rbuf;	/* rx buf */
+	void (*cb)(int data);
 };
 
 struct dcs_cmd_list {
@@ -316,7 +315,6 @@ struct mdss_panel_esd_pdata {
 };
 
 struct mdss_panel_config {
-	bool is_panel_config_loaded;
 	bool esd_enable;
 	struct mutex panel_mutex;
 	bool esd_disable_bl;
@@ -324,31 +322,7 @@ struct mdss_panel_config {
 	bool bare_board;
 	char panel_name[32];
 	u64 panel_ver;
-};
-
-struct mdss_panel_common_pdata {
-	struct mdss_panel_info panel_info;
-	int (*on) (struct mdss_panel_data *pdata);
-	int (*off) (struct mdss_panel_data *pdata);
-	int (*esd) (struct mdss_panel_data *pdata);
-	void(*lock_mutex) (struct mdss_panel_data *pdata);
-	void(*unlock_mutex) (struct mdss_panel_data *pdata);
-	void (*bl_fnc) (struct mdss_panel_data *pdata, u32 bl_level);
-
-	struct dsi_panel_cmds on_cmds;
-	struct dsi_panel_cmds off_cmds;
-	struct dsi_panel_cmds off_cmds_1;
-	int (*reg_read) (struct mdss_panel_data *pdata, u8 reg,
-			int mode, size_t size, u8 *buffer);
-	int (*reg_write) (struct mdss_panel_data *pdata,
-			int mode, size_t size, u8 *buffer);
-	struct dss_module_power vregs;
-	struct mdss_panel_config panel_config;
-	struct mdss_panel_esd_pdata panel_esd_data;
-	int rst_seq[MDSS_DSI_RST_SEQ_LEN];
-	int rst_seq_len;
-	int dis_rst_seq[MDSS_DSI_RST_SEQ_LEN];
-	int dis_rst_seq_len;
+	bool disallow_panel_pwr_off;
 };
 
 struct dsi_drv_cm_data {
@@ -364,15 +338,24 @@ enum {
 	DSI_CTRL_MAX,
 };
 
+#define DSI_EV_PLL_UNLOCKED		0x0001
+#define DSI_EV_MDP_FIFO_UNDERFLOW	0x0002
+#define DSI_EV_MDP_BUSY_RELEASE		0x80000000
+
 struct mdss_dsi_ctrl_pdata {
 	int ndx;	/* panel_num */
 	int (*on) (struct mdss_panel_data *pdata);
 	int (*off) (struct mdss_panel_data *pdata);
-	int (*esd) (struct mdss_panel_data *pdata);
+	int (*partial_update_fnc) (struct mdss_panel_data *pdata);
+	int (*cont_splash_on) (struct mdss_panel_data *pdata);
 	int (*reg_read) (struct mdss_panel_data *pdata, u8 reg,
 			int mode, size_t size, u8 *buffer);
 	int (*reg_write) (struct mdss_panel_data *pdata,
 			int mode, size_t size, u8 *buffer);
+	int (*get_dt_vreg_data) (struct device *dev,
+			struct dss_module_power *mp, struct device_node *node);
+	int (*dsi_cmdlist_put) (struct mdss_dsi_ctrl_pdata *ctrl,
+					 struct dcs_cmd_req *cmdreq);
 	struct mdss_panel_data panel_data;
 	struct mdss_panel_config panel_config;
 	struct mdss_panel_esd_pdata panel_esd_data;
@@ -383,22 +366,31 @@ struct mdss_dsi_ctrl_pdata {
 	unsigned char *ctrl_base;
 	int reg_size;
 	u32 clk_cnt;
+	struct clk *mdp_core_clk;
 	struct clk *ahb_clk;
 	struct clk *axi_clk;
 	struct clk *byte_clk;
 	struct clk *esc_clk;
 	struct clk *pixel_clk;
 	u8 ctrl_state;
+	int panel_mode;
 	int irq_cnt;
 	int mdss_dsi_clk_on;
 	int rst_gpio;
 	int disp_en_gpio;
 	int disp_te_gpio;
+	int mode_gpio;
+	int rst_gpio_requested;
+	int disp_en_gpio_requested;
+	int disp_te_gpio_requested;
+	int mode_gpio_requested;
 	int bklt_ctrl;	/* backlight ctrl */
 	int pwm_period;
 	int pwm_pmic_gpio;
 	int pwm_lpg_chan;
 	int bklt_max;
+	int new_fps;
+	int pwm_enabled;
 	struct pwm_device *pwm_bl;
 	struct dsi_drv_cm_data shared_pdata;
 	u32 pclk_rate;
@@ -410,10 +402,10 @@ struct mdss_dsi_ctrl_pdata {
 	int dis_rst_seq_len;
 	u32 dsi_irq_mask;
 	struct mdss_hw *dsi_hw;
+	struct mdss_panel_recovery *recovery;
 
 	struct dsi_panel_cmds on_cmds;
 	struct dsi_panel_cmds off_cmds;
-	struct dsi_panel_cmds off_cmds_1;
 
 	struct dcs_cmd_list cmdlist;
 	struct completion dma_comp;
@@ -430,13 +422,8 @@ struct mdss_dsi_ctrl_pdata {
 	struct platform_device *pdev;
 };
 
-int dsi_panel_device_register(struct platform_device *pdev,
-			      struct mdss_panel_common_pdata *panel_data);
-
-int mdss_dsi_get_dt_vreg_data(struct device *dev,
-				struct dss_module_power *mp);
-void mdss_dsi_put_dt_vreg_data(struct device *dev,
-				struct dss_module_power *module_power);
+int dsi_panel_device_register(struct device_node *pan_node,
+				struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 char *mdss_dsi_buf_reserve_hdr(struct dsi_buf *dp, int hlen);
 char *mdss_dsi_buf_init(struct dsi_buf *dp);
 void mdss_dsi_init(void);
@@ -446,7 +433,7 @@ int mdss_dsi_cmds_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 		struct dsi_cmd_desc *cmds, int cnt);
 
 int mdss_dsi_cmds_rx(struct mdss_dsi_ctrl_pdata *ctrl,
-			struct dsi_cmd_desc *cmds, int rlen, u32 rx_flags);
+			struct dsi_cmd_desc *cmds, int rlen);
 
 void mdss_dsi_host_init(struct mipi_panel_info *pinfo,
 				struct mdss_panel_data *pdata);
@@ -458,7 +445,7 @@ void mdss_dsi_cmd_mode_ctrl(int enable);
 void mdp4_dsi_cmd_trigger(void);
 void mdss_dsi_cmd_mdp_start(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_cmd_bta_sw_trigger(struct mdss_panel_data *pdata);
-void mdss_dsi_ack_err_status(unsigned char *dsi_base);
+void mdss_dsi_ack_err_status(struct mdss_dsi_ctrl_pdata *ctrl);
 int mdss_dsi_clk_ctrl(struct mdss_dsi_ctrl_pdata *ctrl, int enable);
 void mdss_dsi_clk_req(struct mdss_dsi_ctrl_pdata *ctrl,
 				int enable);
@@ -471,8 +458,8 @@ void mdss_dsi_irq_handler_config(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 
 void mdss_set_tx_power_mode(int mode, struct mdss_panel_data *pdata);
 int mdss_get_tx_power_mode(struct mdss_panel_data *pdata);
-int mdss_dsi_clk_div_config(u8 bpp, u8 lanes,
-			    u32 *expected_dsi_pclk);
+int mdss_dsi_clk_div_config(struct mdss_panel_info *panel_info,
+			    int frame_rate);
 int mdss_dsi_clk_init(struct platform_device *pdev,
 		      struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 void mdss_dsi_clk_deinit(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
@@ -494,4 +481,12 @@ int mdss_dsi_cmdlist_put(struct mdss_dsi_ctrl_pdata *ctrl,
 struct dcs_cmd_req *mdss_dsi_cmdlist_get(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_cmdlist_kickoff(int intf);
 
+int mdss_dsi_panel_init(struct device_node *node,
+		struct mdss_dsi_ctrl_pdata *ctrl_pdata,
+		bool cmd_cfg_cont_splash);
+void mdss_panel_set_reg_boot_on(struct device_node *node,
+					struct mdss_dsi_ctrl_pdata *ctrl_pdata);
+int mdss_panel_parse_panel_config_dt(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
+bool mdss_dsi_match_chosen_panel(struct device_node *np,
+				struct mdss_panel_config *pconfig);
 #endif /* MDSS_DSI_H */

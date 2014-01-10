@@ -102,6 +102,14 @@ static DEFINE_SPINLOCK(reg_spinlock);
 
 #define PRONTO_PMU_COM_CPU_CBCR_OFFSET     0x0030
 #define PRONTO_PMU_COM_AHB_CBCR_OFFSET     0x0034
+
+#define PRONTO_PMU_WLAN_AHB_CBCR_OFFSET    0x0074
+#define PRONTO_PMU_WLAN_AHB_CBCR_CLK_EN    BIT(0)
+#define PRONTO_PMU_WLAN_AHB_CBCR_CLK_OFF   BIT(31)
+
+#define PRONTO_PMU_CPU_AHB_CMD_RCGR_OFFSET  0x0120
+#define PRONTO_PMU_CPU_AHB_CMD_RCGR_ROOT_EN BIT(1)
+
 #define PRONTO_PMU_CFG_OFFSET              0x1004
 #define PRONTO_PMU_COM_CSR_OFFSET          0x1040
 #define PRONTO_PMU_SOFT_RESET_OFFSET       0x104C
@@ -478,7 +486,7 @@ EXPORT_SYMBOL(wcnss_riva_log_debug_regs);
 void wcnss_pronto_log_debug_regs(void)
 {
 	void __iomem *reg_addr, *tst_addr, *tst_ctrl_addr;
-	u32 reg = 0, reg2 = 0;
+	u32 reg = 0, reg2 = 0, reg3 = 0, reg4 = 0;
 
 
 	reg_addr = penv->msm_wcnss_base + PRONTO_PMU_SPARE_OFFSET;
@@ -634,8 +642,19 @@ void wcnss_pronto_log_debug_regs(void)
 	reg_addr = penv->msm_wcnss_base + PRONTO_PMU_WLAN_GDSCR_OFFSET;
 	reg2 = readl_relaxed(reg_addr);
 
+	reg_addr = penv->msm_wcnss_base + PRONTO_PMU_WLAN_AHB_CBCR_OFFSET;
+	reg3 = readl_relaxed(reg_addr);
+	pr_info_ratelimited("%s:  PMU_WLAN_AHB_CBCR %08x\n", __func__, reg3);
+
+	reg_addr = penv->msm_wcnss_base + PRONTO_PMU_CPU_AHB_CMD_RCGR_OFFSET;
+	reg4 = readl_relaxed(reg_addr);
+	pr_info_ratelimited("%s:  PMU_CPU_CMD_RCGR %08x\n", __func__, reg4);
+
 	if ((reg & PRONTO_PMU_WLAN_BCR_BLK_ARES) ||
-			(reg2 & PRONTO_PMU_WLAN_GDSCR_SW_COLLAPSE)) {
+		(reg2 & PRONTO_PMU_WLAN_GDSCR_SW_COLLAPSE) ||
+		(!(reg4 & PRONTO_PMU_CPU_AHB_CMD_RCGR_ROOT_EN)) ||
+		(reg3 & PRONTO_PMU_WLAN_AHB_CBCR_CLK_OFF) ||
+		(!(reg3 & PRONTO_PMU_WLAN_AHB_CBCR_CLK_EN))) {
 		pr_info_ratelimited("%s:  Cannot log, wlan domain is power collapsed\n",
 				__func__);
 		return;
@@ -649,6 +668,14 @@ void wcnss_pronto_log_debug_regs(void)
 
 }
 EXPORT_SYMBOL(wcnss_pronto_log_debug_regs);
+
+#ifdef CONFIG_WCNSS_REGISTER_DUMP_ON_BITE
+void wcnss_log_debug_regs_on_bite(void)
+{
+	if (wcnss_hardware_type() == WCNSS_PRONTO_HW)
+		wcnss_pronto_log_debug_regs();
+}
+#endif
 
 /* interface to reset wcnss by sending the reset interrupt */
 void wcnss_reset_intr(void)
@@ -2007,19 +2034,17 @@ fail_gpio_res:
 static int wcnss_node_open(struct inode *inode, struct file *file)
 {
 	struct platform_device *pdev;
+	int rc = 0;
 
 	if (!penv)
 		return -EFAULT;
 
-	/* first open is only to trigger WCNSS platform driver */
 	if (!penv->triggered) {
 		pr_info(DEVICE " triggered by userspace\n");
 		pdev = penv->pdev;
-		return wcnss_trigger_config(pdev);
-
-	} else if (penv->device_opened) {
-		pr_info(DEVICE " already opened\n");
-		return -EBUSY;
+		rc = wcnss_trigger_config(pdev);
+		if (rc)
+			return -EFAULT;
 	}
 
 	mutex_lock(&penv->dev_lock);
@@ -2030,7 +2055,7 @@ static int wcnss_node_open(struct inode *inode, struct file *file)
 	penv->device_opened = 1;
 	mutex_unlock(&penv->dev_lock);
 
-	return 0;
+	return rc;
 }
 
 static ssize_t wcnss_wlan_read(struct file *fp, char __user

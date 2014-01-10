@@ -481,6 +481,10 @@ static bool __ref msm_pm_spm_power_collapse(
 	bool collapsed = 0;
 	int ret;
 	bool save_cpu_regs = !cpu || from_idle;
+	unsigned int saved_gic_cpu_ctrl;
+
+	saved_gic_cpu_ctrl = readl_relaxed(MSM_QGIC_CPU_BASE + GIC_CPU_CTRL);
+	mb();
 
 	if (MSM_PM_DEBUG_POWER_COLLAPSE & msm_pm_debug_mask)
 		pr_info("CPU%u: %s: notify_rpm %d\n",
@@ -503,6 +507,9 @@ static bool __ref msm_pm_spm_power_collapse(
 	if (from_idle && msm_pm_pc_reset_timer)
 		clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &cpu);
 
+#ifdef CONFIG_VFP
+	vfp_pm_suspend();
+#endif
 	collapsed = save_cpu_regs ? msm_pm_collapse() : msm_pm_pc_hotplug();
 
 	if (from_idle && msm_pm_pc_reset_timer)
@@ -511,7 +518,14 @@ static bool __ref msm_pm_spm_power_collapse(
 	msm_pm_boot_config_after_pc(cpu);
 
 	if (collapsed) {
+#ifdef CONFIG_VFP
+		vfp_pm_resume();
+#endif
 		cpu_init();
+		writel(0xF0, MSM_QGIC_CPU_BASE + GIC_CPU_PRIMASK);
+		writel_relaxed(saved_gic_cpu_ctrl,
+				MSM_QGIC_CPU_BASE + GIC_CPU_CTRL);
+		mb();
 		local_fiq_enable();
 	}
 
@@ -637,8 +651,11 @@ static int64_t msm_pm_timer_enter_suspend(int64_t *period)
 {
 	int64_t time = 0;
 
-	if (msm_pm_use_sync_timer)
-		return sched_clock();
+	if (msm_pm_use_sync_timer) {
+		struct timespec ts;
+		getnstimeofday(&ts);
+		return timespec_to_ns(&ts);
+	}
 
 	time = msm_timer_get_sclk_time(period);
 	if (!time)
@@ -649,8 +666,12 @@ static int64_t msm_pm_timer_enter_suspend(int64_t *period)
 
 static int64_t msm_pm_timer_exit_suspend(int64_t time, int64_t period)
 {
-	if (msm_pm_use_sync_timer)
-		return sched_clock() - time;
+	if (msm_pm_use_sync_timer) {
+		struct timespec ts;
+		getnstimeofday(&ts);
+
+		return timespec_to_ns(&ts) - time;
+	}
 
 	if (time != 0) {
 		int64_t end_time = msm_timer_get_sclk_time(NULL);
@@ -1037,12 +1058,14 @@ void msm_pm_enable_retention(bool enable)
 }
 EXPORT_SYMBOL(msm_pm_enable_retention);
 
+static int64_t suspend_time, suspend_period;
+static int collapsed;
+static int suspend_power_collapsed;
+
 static int msm_pm_enter(suspend_state_t state)
 {
 	bool allow[MSM_PM_SLEEP_MODE_NR];
 	int i;
-	int64_t period = 0;
-	int64_t time = msm_pm_timer_enter_suspend(&period);
 	struct msm_pm_time_params time_param;
 
 	time_param.latency_us = -1;
@@ -1070,7 +1093,6 @@ static int msm_pm_enter(suspend_state_t state)
 		int ret = -ENODEV;
 		uint32_t power;
 		uint32_t msm_pm_max_sleep_time = 0;
-		int collapsed = 0;
 
 		if (MSM_PM_DEBUG_SUSPEND & msm_pm_debug_mask)
 			pr_info("%s: power collapse\n", __func__);
@@ -1104,11 +1126,7 @@ static int msm_pm_enter(suspend_state_t state)
 			pr_err("%s: cannot find the lowest power limit\n",
 				__func__);
 		}
-		time = msm_pm_timer_exit_suspend(time, period);
-		if (collapsed)
-			msm_pm_add_stat(MSM_PM_STAT_SUSPEND, time);
-		else
-			msm_pm_add_stat(MSM_PM_STAT_FAILED_SUSPEND, time);
+		suspend_power_collapsed = true;
 	} else if (allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE]) {
 		if (MSM_PM_DEBUG_SUSPEND & msm_pm_debug_mask)
 			pr_info("%s: standalone power collapse\n", __func__);
@@ -1138,6 +1156,7 @@ void msm_pm_set_sleep_ops(struct msm_pm_sleep_ops *ops)
 
 static int msm_suspend_prepare(void)
 {
+	suspend_time = msm_pm_timer_enter_suspend(&suspend_period);
 	msm_mpm_suspend_prepare();
 	return 0;
 }
@@ -1145,6 +1164,16 @@ static int msm_suspend_prepare(void)
 static void msm_suspend_wake(void)
 {
 	msm_mpm_suspend_wake();
+	if (suspend_power_collapsed) {
+		suspend_time = msm_pm_timer_exit_suspend(suspend_time,
+				suspend_period);
+		if (collapsed)
+			msm_pm_add_stat(MSM_PM_STAT_SUSPEND, suspend_time);
+		else
+			msm_pm_add_stat(MSM_PM_STAT_FAILED_SUSPEND,
+					suspend_time);
+		suspend_power_collapsed = false;
+	}
 }
 
 static const struct platform_suspend_ops msm_pm_ops = {

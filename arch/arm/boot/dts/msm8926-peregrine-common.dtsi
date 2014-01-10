@@ -15,6 +15,7 @@
 /include/ "msm8226-v1-pm.dtsi"
 /include/ "msm8926-peregrine-gpiomux.dtsi"
 /include/ "dsi-panel-mot-cmi-720p-video.dtsi"
+/include/ "dsi-panel-mot-lgd-720p-video.dtsi"
 
 / {
 	model = "Motorola QC-MSM8926 Peregrine";
@@ -46,7 +47,7 @@
 
 	qcom,msm-mem-hole {
 		compatible = "qcom,msm-mem-hole";
-		qcom,memblock-remove = <0x08000000 0x7600000
+		qcom,memblock-remove = <0x07300000 0x8300000
 					0x0fa00000 0x500000>; /* Address and size of the hole */
 	};
 
@@ -64,6 +65,18 @@
 	status = "ok";
 };
 
+&pm8226_vadc {
+	qcom,adc-batt-therm-type = <1>;
+};
+
+&pm8226_adc_tm {
+	qcom,adc-batt-therm-type = <1>;
+};
+
+&pm8226_iadc {
+	qcom,rsense = <10000000>;
+};
+
 &i2c_2 {
 	l3g4200d@6a {
 		compatible = "stm,l3g4200d";
@@ -73,7 +86,7 @@
 		gpios = <&msmgpio 35 0>; /* DRDY/INT2 */
 	};
 
-	pnxxx@28 {
+	pn544: pnxxx@28 {
 		compatible = "nxp,pn544";
 		reg = <0x28>;
 		interrupt-parent = <&msmgpio>;
@@ -83,6 +96,7 @@
 			<&msmgpio 22 0>;     /* Firmware */
 		nxp,pnxxx-discharge-delay = <2000>;
 		nxp,pnxxx-ven-inv-polarity = <0>;
+		status = "disabled";
 	};
 
 	lis3dh@18 {
@@ -160,19 +174,24 @@
 };
 
 &mot_cmi_720p_vid_v0 {
-	vddio_disp-supply = <&vddio_disp_vreg>;
-	lcdbias-supply = <&tps65132>;
 	qcom,cont-splash-enabled;
 };
 
 &mot_cmi_720p_vid_v1 {
-	vddio_disp-supply = <&vddio_disp_vreg>;
-	lcdbias-supply = <&tps65132>;
 	qcom,cont-splash-enabled;
 };
 
 &mot_cmi_720p_vid_v2 {
-	vddio_disp-supply = <&vddio_disp_vreg>;
-	lcdbias-supply = <&tps65132>;
 	qcom,cont-splash-enabled;
 };
+
+&mot_lgd_720p_vid_v0 {
+	qcom,cont-splash-enabled;
+};
+
+&mdss_dsi0 {
+	vdd_disp-supply = <&pm8226_l28>;
+	vddio_disp-supply = <&vddio_disp_vreg>;
+	lcdbias-supply = <&tps65132>;
+};
+

@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  */
 
-&soc {
+&mdss_mdp {
 	mot_cmi_720p_vid_v2: qcom,mdss_dsi_mot_cmi_720p_video_v2 {
                 compatible = "qcom,mdss-dsi-panel";
                 status = "ok";
@@ -70,9 +70,8 @@
 			29 01 00 00 00 00 02 29 00];    /* display on */
 
 		qcom,mdss-dsi-off-command = [
-			05 01 00 00 01 00 02 28 00];     /* display off */
-		qcom,mdss-dsi-off-1-command = [
-			05 01 00 00 78 00 02 10 00];      /* enter sleep */
+			05 01 00 00 78 00 02 28 00     /* display off */
+			05 01 00 00 32 00 02 10 00];   /* enter sleep */
 
 		qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
 		qcom,mdss-dsi-off-command-state = "dsi_hs_mode";
@@ -102,8 +101,10 @@
 			qcom,supply-max-voltage = <1800000>;
 			qcom,supply-enable-load = <100000>;
 			qcom,supply-disable-load = <100>;
-			qcom,supply-post-en-delay-ms = <2>;
-			qcom,supply-post-dis-delay-ms = <0>;
+			qcom,supply-pre-on-sleep = <0>;
+			qcom,supply-post-on-sleep = <2>;
+			qcom,supply-pre-off-sleep = <0>;
+			qcom,supply-post-off-sleep = <0>;
 		};
 		qcom,platform-supply-entry2 {
 			qcom,supply-name = "lcdbias";
@@ -111,8 +112,10 @@
 			qcom,supply-max-voltage = <5400000>;
 			qcom,supply-enable-load = <100000>;
 			qcom,supply-disable-load = <100>;
-			qcom,supply-post-en-delay-ms = <11>;
-			qcom,supply-post-dis-delay-ms = <2>;
+			qcom,supply-pre-on-sleep = <0>;
+			qcom,supply-post-on-sleep = <11>;
+			qcom,supply-pre-off-sleep = <0>;
+			qcom,supply-post-off-sleep = <2>;
 		};
 	};
 
@@ -212,9 +215,8 @@
 			29 01 00 00 00 00 02 29 00];    /* display on */
 
 		qcom,mdss-dsi-off-command = [
-			05 01 00 00 01 00 02 28 00];     /* display off */
-		qcom,mdss-dsi-off-1-command = [
-			05 01 00 00 78 00 02 10 00];      /* enter sleep */
+			05 01 00 00 78 00 02 28 00     /* display off */
+			05 01 00 00 32 00 02 10 00];   /* enter sleep */
 
 		qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
 		qcom,mdss-dsi-off-command-state = "dsi_hs_mode";
@@ -244,8 +246,10 @@
 			qcom,supply-max-voltage = <1800000>;
 			qcom,supply-enable-load = <100000>;
 			qcom,supply-disable-load = <100>;
-			qcom,supply-post-en-delay-ms = <2>;
-			qcom,supply-post-dis-delay-ms = <0>;
+			qcom,supply-pre-on-sleep = <0>;
+			qcom,supply-post-on-sleep = <2>;
+			qcom,supply-pre-off-sleep = <0>;
+			qcom,supply-post-off-sleep = <0>;
 		};
 		qcom,platform-supply-entry2 {
 			qcom,supply-name = "lcdbias";
@@ -253,8 +257,10 @@
 			qcom,supply-max-voltage = <5400000>;
 			qcom,supply-enable-load = <100000>;
 			qcom,supply-disable-load = <100>;
-			qcom,supply-post-en-delay-ms = <11>;
-			qcom,supply-post-dis-delay-ms = <2>;
+			qcom,supply-pre-on-sleep = <0>;
+			qcom,supply-post-on-sleep = <11>;
+			qcom,supply-pre-off-sleep = <0>;
+			qcom,supply-post-off-sleep = <2>;
 		};
 	};
 
@@ -313,9 +319,8 @@
 			29 01 00 00 00 00 02 29 00];    /* display on */
 
 		qcom,mdss-dsi-off-command = [
-			05 01 00 00 01 00 02 28 00];     /* display off */
-		qcom,mdss-dsi-off-1-command = [
-			05 01 00 00 78 00 02 10 00];     /* enter sleep */
+			05 01 00 00 78 00 02 28 00     /* display off */
+			05 01 00 00 32 00 02 10 00];   /* enter sleep */
 
 		qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
 		qcom,mdss-dsi-off-command-state = "dsi_hs_mode";
@@ -345,8 +350,10 @@
 			qcom,supply-max-voltage = <1800000>;
 			qcom,supply-enable-load = <100000>;
 			qcom,supply-disable-load = <100>;
-			qcom,supply-post-en-delay-ms = <2>;
-			qcom,supply-post-dis-delay-ms = <0>;
+			qcom,supply-pre-on-sleep = <0>;
+			qcom,supply-post-on-sleep = <2>;
+			qcom,supply-pre-off-sleep = <0>;
+			qcom,supply-post-off-sleep = <0>;
 		};
 		qcom,platform-supply-entry2 {
 			qcom,supply-name = "lcdbias";
@@ -354,8 +361,10 @@
 			qcom,supply-max-voltage = <5400000>;
 			qcom,supply-enable-load = <100000>;
 			qcom,supply-disable-load = <100>;
-			qcom,supply-post-en-delay-ms = <11>;
-			qcom,supply-post-dis-delay-ms = <2>;
+			qcom,supply-pre-on-sleep = <0>;
+			qcom,supply-post-on-sleep = <11>;
+			qcom,supply-pre-off-sleep = <0>;
+			qcom,supply-post-off-sleep = <2>;
 		};
 	};
 };

@@ -23,7 +23,9 @@
 #define SYNAPTICS_DSX_DRIVER_VERSION "DSX 1.1"
 
 #include <linux/version.h>
-#ifdef CONFIG_FB
+#if defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
+#include <mach/mmi_panel_notifier.h>
+#elif defined(CONFIG_FB)
 #include <linux/notifier.h>
 #include <linux/fb.h>
 #endif
@@ -242,7 +244,9 @@ struct synaptics_rmi4_data {
 	struct regulator *regulator;
 	struct mutex rmi4_io_ctrl_mutex;
 	struct mutex state_mutex;
-#ifdef CONFIG_FB
+#if defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
+	struct mmi_notifier panel_nb;
+#elif defined(CONFIG_FB)
 	struct notifier_block panel_nb;
 #endif
 	atomic_t panel_off_flag;
@@ -274,6 +278,7 @@ struct synaptics_rmi4_data {
 	bool reset_on_resume;
 	bool hw_reset;
 	bool one_touch_enabled;
+	bool poweron;
 	wait_queue_head_t wait;
 	int (*i2c_read)(struct synaptics_rmi4_data *pdata, unsigned short addr,
 			unsigned char *data, unsigned short length);
@@ -282,8 +287,8 @@ struct synaptics_rmi4_data {
 	void (*set_state)(struct synaptics_rmi4_data *rmi4_data, int state);
 	int (*ready_state)(struct synaptics_rmi4_data *rmi4_data, bool standby);
 	int (*irq_enable)(struct synaptics_rmi4_data *rmi4_data, bool enable);
-	int (*reset_device)(struct synaptics_rmi4_data *rmi4_data);
-	int (*query_device)(struct synaptics_rmi4_data *rmi4_data);
+	int (*reset_device)(struct synaptics_rmi4_data *rmi4_data,
+			unsigned char *f01_cmd_base_addr);
 	int number_resumes;
 	int last_resume;
 	struct synaptics_rmi4_resume_info *resume_info;

@@ -71,7 +71,7 @@ static struct msm_sensor_power_setting mt9m114_power_setting[] = {
 		.seq_type = SENSOR_CLK,
 		.seq_val = SENSOR_CAM_MCLK,
 		.config_val = 0,
-		.delay = 100,
+		.delay = 50,
 	},
 	{
 		.seq_type = SENSOR_I2C_MUX,
@@ -203,6 +203,9 @@ static struct msm_camera_i2c_reg_conf mt9m114_recommend_settings[] = {
 	{0xC80A, 0x6C00,},/*pixclk = 48000000*/
 	{0xC80C, 0x0001,},/*row_speed = 1*/
 	{0xC80E, 0x00DB,},/*fine_integ_time_min = 219*/
+	{0xC810, 0x05B3,}, /*cam_sensor_cfg_fine_integ_time_max = 1459*/
+	{0xC812, 0x03EE,}, /*cam_sensor_cfg_frame_length_lines = 1006*/
+	{0xC814, 0x0636,}, /*cam_sensor_cfg_line_length_pclk = 1590*/
 	{0xC816, 0x0060,},/*fine_correction = 96*/
 	{0xC818, 0x02D3,},/*cpipe_last_row = 723*/
 	{0xC826, 0x0020,},/*reg_0_data = 32*/
@@ -215,6 +218,8 @@ static struct msm_camera_i2c_reg_conf mt9m114_recommend_settings[] = {
 	{0xC868, 0x0500,},/*output_width = 1280*/
 	{0xC86A, 0x02D0,},/*output_height = 720*/
 	{0xC878, 0x00, MSM_CAMERA_I2C_BYTE_DATA},  /*aet_aemode = 0*/
+	{0xC88C, 0x1E02,}, /*cam_aet_max_frame_rate = 7682*/
+	{0xC88E, 0x0F00,}, /*cam_aet_min_frame_rate = 3840*/
 	{0xC914, 0x0000,},/*stat_awb_window_xstart = 0*/
 	{0xC916, 0x0000,},/*stat_awb_window_ystart = 0*/
 	{0xC918, 0x04FF,},/*stat_awb_window_xend = 1279*/
@@ -1261,25 +1266,29 @@ static struct msm_camera_i2c_reg_conf mt9m114_config_change_settings[] = {
 		MSM_CAMERA_I2C_CMD_WRITE},
 	{MT9M114_COMMAND_REGISTER, MT9M114_COMMAND_REGISTER_SET_STATE,
 		MSM_CAMERA_I2C_UNSET_WORD_MASK, MSM_CAMERA_I2C_CMD_POLL},
-	{0xDC01, 0x31, MSM_CAMERA_I2C_BYTE_DATA},
+	{0xDC01, 0x31, MSM_CAMERA_I2C_BYTE_DATA, MSM_CAMERA_I2C_CMD_POLL},
 	{0xE000, 0x1028, MSM_CAMERA_I2C_WORD_DATA, MSM_CAMERA_I2C_CMD_WRITE},
 	{0xE002, 0x1003, MSM_CAMERA_I2C_WORD_DATA, MSM_CAMERA_I2C_CMD_WRITE},
 	{0xE004, 0x4103, MSM_CAMERA_I2C_WORD_DATA, MSM_CAMERA_I2C_CMD_WRITE},
 	{0xE006, 0x0202, MSM_CAMERA_I2C_WORD_DATA, MSM_CAMERA_I2C_CMD_WRITE},
-	{0xdc00, 0x28, MSM_CAMERA_I2C_BYTE_DATA, MSM_CAMERA_I2C_CMD_WRITE},
-	{MT9M114_COMMAND_REGISTER, MT9M114_COMMAND_REGISTER_SET_STATE,
-		MSM_CAMERA_I2C_UNSET_WORD_MASK, MSM_CAMERA_I2C_CMD_POLL},
 	{MT9M114_COMMAND_REGISTER, (MT9M114_COMMAND_REGISTER_OK |
-		MT9M114_COMMAND_REGISTER_SET_STATE), MSM_CAMERA_I2C_WORD_DATA,
+		MT9M114_COMMAND_REGISTER_APPLY_PATCH), MSM_CAMERA_I2C_WORD_DATA,
 		MSM_CAMERA_I2C_CMD_WRITE},
-	{MT9M114_COMMAND_REGISTER, MT9M114_COMMAND_REGISTER_SET_STATE,
+	{MT9M114_COMMAND_REGISTER, MT9M114_COMMAND_REGISTER_APPLY_PATCH,
 		MSM_CAMERA_I2C_UNSET_WORD_MASK, MSM_CAMERA_I2C_CMD_POLL},
-	{0xDC01, 0x31, MSM_CAMERA_I2C_BYTE_DATA},
 	{0xE000, 0x010C, MSM_CAMERA_I2C_WORD_DATA, MSM_CAMERA_I2C_CMD_WRITE},
 	{0xE002, 0x0202, MSM_CAMERA_I2C_WORD_DATA, MSM_CAMERA_I2C_CMD_WRITE},
 	{0xE004, 0x4103, MSM_CAMERA_I2C_WORD_DATA, MSM_CAMERA_I2C_CMD_WRITE},
 	{0xE006, 0x0202, MSM_CAMERA_I2C_WORD_DATA, MSM_CAMERA_I2C_CMD_WRITE},
-	{0xdc00, 0x28, MSM_CAMERA_I2C_BYTE_DATA, MSM_CAMERA_I2C_CMD_WRITE},
+	{MT9M114_COMMAND_REGISTER, (MT9M114_COMMAND_REGISTER_OK |
+		MT9M114_COMMAND_REGISTER_APPLY_PATCH), MSM_CAMERA_I2C_WORD_DATA,
+		MSM_CAMERA_I2C_CMD_WRITE},
+	{MT9M114_COMMAND_REGISTER, MT9M114_COMMAND_REGISTER_APPLY_PATCH,
+		MSM_CAMERA_I2C_UNSET_WORD_MASK, MSM_CAMERA_I2C_CMD_POLL},
+};
+
+static struct msm_camera_i2c_reg_conf mt9m114_config_start_stream[] = {
+	{0xdc00, 0x54, MSM_CAMERA_I2C_BYTE_DATA, MSM_CAMERA_I2C_CMD_WRITE},
 	{MT9M114_COMMAND_REGISTER, MT9M114_COMMAND_REGISTER_SET_STATE,
 		MSM_CAMERA_I2C_UNSET_WORD_MASK, MSM_CAMERA_I2C_CMD_POLL},
 	{MT9M114_COMMAND_REGISTER, (MT9M114_COMMAND_REGISTER_OK |
@@ -1287,6 +1296,19 @@ static struct msm_camera_i2c_reg_conf mt9m114_config_change_settings[] = {
 		MSM_CAMERA_I2C_CMD_WRITE},
 	{MT9M114_COMMAND_REGISTER, MT9M114_COMMAND_REGISTER_SET_STATE,
 		MSM_CAMERA_I2C_UNSET_WORD_MASK, MSM_CAMERA_I2C_CMD_POLL},
+	{0xDC01, 0x31, MSM_CAMERA_I2C_BYTE_DATA, MSM_CAMERA_I2C_CMD_POLL},
+};
+
+static struct msm_camera_i2c_reg_conf mt9m114_config_stop_stream[] = {
+	{0xdc00, 0x50, MSM_CAMERA_I2C_BYTE_DATA, MSM_CAMERA_I2C_CMD_WRITE},
+	{MT9M114_COMMAND_REGISTER, MT9M114_COMMAND_REGISTER_SET_STATE,
+		MSM_CAMERA_I2C_UNSET_WORD_MASK, MSM_CAMERA_I2C_CMD_POLL},
+	{MT9M114_COMMAND_REGISTER, (MT9M114_COMMAND_REGISTER_OK |
+		MT9M114_COMMAND_REGISTER_SET_STATE), MSM_CAMERA_I2C_WORD_DATA,
+		MSM_CAMERA_I2C_CMD_WRITE},
+	{MT9M114_COMMAND_REGISTER, MT9M114_COMMAND_REGISTER_SET_STATE,
+		MSM_CAMERA_I2C_UNSET_WORD_MASK, MSM_CAMERA_I2C_CMD_POLL},
+	{0xDC01, 0x52, MSM_CAMERA_I2C_BYTE_DATA, MSM_CAMERA_I2C_CMD_POLL},
 };
 
 static const struct i2c_device_id mt9m114_i2c_id[] = {
@@ -1537,21 +1559,27 @@ static int32_t mt9m114_set_frame_rate_range(struct msm_sensor_ctrl_t *s_ctrl,
 		struct var_fps_range_t *fps_range)
 {
 	int32_t rc = 0;
+	static bool fps_15_30 = true;
 
-	if (fps_range->min_fps == 15 && fps_range->max_fps == 15) {
-		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->
-			i2c_write_conf_tbl(
-					s_ctrl->sensor_i2c_client,
-					mt9m114_15_15_fps_settings,
-					ARRAY_SIZE(mt9m114_15_15_fps_settings),
-					MSM_CAMERA_I2C_WORD_DATA);
-	} else if (fps_range->min_fps == 15 && fps_range->max_fps == 30) {
+	if (fps_range->min_fps == 15 && fps_range->max_fps == 30) {
+		if (fps_15_30)
+			return rc;
+
 		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->
 			i2c_write_conf_tbl(
 					s_ctrl->sensor_i2c_client,
 					mt9m114_15_30_fps_settings,
 					ARRAY_SIZE(mt9m114_15_30_fps_settings),
 					MSM_CAMERA_I2C_WORD_DATA);
+		fps_15_30 = true;
+	} else if (fps_range->min_fps == 15 && fps_range->max_fps == 15) {
+		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->
+			i2c_write_conf_tbl(
+					s_ctrl->sensor_i2c_client,
+					mt9m114_15_15_fps_settings,
+					ARRAY_SIZE(mt9m114_15_15_fps_settings),
+					MSM_CAMERA_I2C_WORD_DATA);
+		fps_15_30 = false;
 	} else {
 		pr_err("%s: Invalid frame rate range!\n", __func__);
 		return -EINVAL;
@@ -1662,13 +1690,19 @@ int32_t mt9m114_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 			MSM_CAMERA_I2C_WORD_DATA);
 		break;
 	case CFG_SET_STOP_STREAM:
+		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->
+			i2c_write_conf_tbl(
+			s_ctrl->sensor_i2c_client,
+			mt9m114_config_stop_stream,
+			ARRAY_SIZE(mt9m114_config_stop_stream),
+			MSM_CAMERA_I2C_WORD_DATA);
 		break;
 	case CFG_SET_START_STREAM:
 		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->
 			i2c_write_conf_tbl(
 			s_ctrl->sensor_i2c_client,
-			mt9m114_config_change_settings,
-			ARRAY_SIZE(mt9m114_config_change_settings),
+			mt9m114_config_start_stream,
+			ARRAY_SIZE(mt9m114_config_start_stream),
 			MSM_CAMERA_I2C_WORD_DATA);
 		break;
 	case CFG_GET_SENSOR_INIT_PARAMS:

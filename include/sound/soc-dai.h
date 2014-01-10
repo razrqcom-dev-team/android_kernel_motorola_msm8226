@@ -19,6 +19,7 @@
 
 struct snd_pcm_substream;
 struct snd_soc_dapm_widget;
+struct snd_compr_stream;
 
 /*
  * DAI hardware audio formats.
@@ -206,12 +207,15 @@ struct snd_soc_dai_driver {
 	const char *name;
 	unsigned int id;
 	int ac97_control;
+	unsigned int base;
 
 	/* DAI driver callbacks */
 	int (*probe)(struct snd_soc_dai *dai);
 	int (*remove)(struct snd_soc_dai *dai);
 	int (*suspend)(struct snd_soc_dai *dai);
 	int (*resume)(struct snd_soc_dai *dai);
+	/* compress dai */
+	bool compress_dai;
 
 	/* ops */
 	const struct snd_soc_dai_ops *ops;

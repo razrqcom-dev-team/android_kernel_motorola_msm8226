@@ -11,6 +11,16 @@
  * GNU General Public License for more details.
  */
 
+&soc {
+	led_flash0: qcom,camera-led-flash {
+		cell-index = <0>;
+		compatible = "qcom,camera-led-flash";
+		qcom,flash-type = <1>;
+		qcom,flash-source = <&pm8941_flash0 &pm8941_flash1>;
+		qcom,torch-source = <&pm8941_torch>;
+	};
+};
+
 &cci {
 
 	actuator0: qcom,actuator@18 {
@@ -78,6 +88,7 @@
 		qcom,mount-angle = <270>;
 		qcom,sensor-name = "imx135";
 		qcom,actuator-src = <&actuator1>;
+		qcom,led-flash-src = <&led_flash0>;
 		cam_vdig-supply = <&pm8941_l3>;
 		cam_vana-supply = <&pm8941_l17>;
 		cam_vio-supply = <&pm8941_lvs3>;

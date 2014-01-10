@@ -67,24 +67,31 @@ static int recover_dentry(struct page *ipage, struct inode *inode)
 	name.name = raw_inode->i_name;
 retry:
 	de = f2fs_find_entry(dir, &name, &page);
-	if (de && inode->i_ino == le32_to_cpu(de->ino)) {
-		kunmap(page);
-		f2fs_put_page(page, 0);
-		goto out;
-	}
+	if (de && inode->i_ino == le32_to_cpu(de->ino))
+		goto out_unmap_put;
 	if (de) {
 		einode = f2fs_iget(inode->i_sb, le32_to_cpu(de->ino));
 		if (IS_ERR(einode)) {
 			WARN_ON(1);
 			if (PTR_ERR(einode) == -ENOENT)
 				err = -EEXIST;
-			goto out;
+			goto out_unmap_put;
+		}
+		err = acquire_orphan_inode(F2FS_SB(inode->i_sb));
+		if (err) {
+			iput(einode);
+			goto out_unmap_put;
 		}
 		f2fs_delete_entry(de, page, einode);
 		iput(einode);
 		goto retry;
 	}
 	err = __f2fs_add_link(dir, &name, inode);
+	goto out;
+
+out_unmap_put:
+	kunmap(page);
+	f2fs_put_page(page, 0);
 out:
 	f2fs_msg(inode->i_sb, KERN_DEBUG, "recover_inode and its dentry: "
 			"ino = %x, name = %s, dir = %lx, err = %d",
@@ -231,6 +238,12 @@ static int check_index_in_prev_nodes(struct f2fs_sb_info *sbi,
 	block_t bidx;
 	int i;
 
+	if (segno >= TOTAL_SEGS(sbi)) {
+		f2fs_msg(sbi->sb, KERN_ERR, "invalid segment number %u", segno);
+		if (f2fs_handle_error(sbi))
+			return -EIO;
+	}
+
 	sentry = get_seg_entry(sbi, segno);
 	if (!f2fs_test_bit(blkoff, sentry->cur_valid_map))
 		return 0;
@@ -277,6 +290,14 @@ static int check_index_in_prev_nodes(struct f2fs_sb_info *sbi,
 	ino = ino_of_node(node_page);
 	f2fs_put_page(node_page, 1);
 
+	/* Skip nodes with circular references */
+	if (ino == dn->inode->i_ino) {
+		f2fs_msg(sbi->sb, KERN_ERR, "%s: node %x has circular inode %x",
+				__func__, ino, nid);
+		f2fs_handle_error(sbi);
+		return -EDEADLK;
+	}
+
 	/* Deallocate previous index in the node page */
 	inode = f2fs_iget(sbi->sb, ino);
 	if (IS_ERR(inode))
@@ -299,7 +320,6 @@ static int do_recover_data(struct f2fs_sb_info *sbi, struct inode *inode,
 	struct f2fs_summary sum;
 	struct node_info ni;
 	int err = 0, recovered = 0;
-	int ilock;
 
 	start = start_bidx_of_node(ofs_of_node(page), fi);
 	if (IS_INODE(page))
@@ -307,12 +327,12 @@ static int do_recover_data(struct f2fs_sb_info *sbi, struct inode *inode,
 	else
 		end = start + ADDRS_PER_BLOCK;
 
-	ilock = mutex_lock_op(sbi);
+	f2fs_lock_op(sbi);
 	set_new_dnode(&dn, inode, NULL, NULL, 0);
 
 	err = get_dnode_of_data(&dn, start, ALLOC_NODE);
 	if (err) {
-		mutex_unlock_op(sbi, ilock);
+		f2fs_unlock_op(sbi);
 		f2fs_msg(sbi->sb, KERN_INFO,
 			"%s: get_dnode_of_data failed: %d", __func__, err);
 		return err;
@@ -321,8 +341,8 @@ static int do_recover_data(struct f2fs_sb_info *sbi, struct inode *inode,
 	wait_on_page_writeback(dn.node_page);
 
 	get_node_info(sbi, dn.nid, &ni);
-	BUG_ON(ni.ino != ino_of_node(page));
-	BUG_ON(ofs_of_node(dn.node_page) != ofs_of_node(page));
+	f2fs_bug_on(ni.ino != ino_of_node(page));
+	f2fs_bug_on(ofs_of_node(dn.node_page) != ofs_of_node(page));
 
 	for (; start < end; start++) {
 		block_t src, dest;
@@ -332,13 +352,13 @@ static int do_recover_data(struct f2fs_sb_info *sbi, struct inode *inode,
 
 		if (src != dest && dest != NEW_ADDR && dest != NULL_ADDR) {
 			if (src == NULL_ADDR) {
-				int err = reserve_new_block(&dn);
+				err = reserve_new_block(&dn);
 				/* We should not get -ENOSPC */
+				f2fs_bug_on(err);
 				if (err)
 					f2fs_msg(sbi->sb, KERN_INFO,
 						"%s: reserve_new_block failed: %d",
 						__func__, err);
-				BUG_ON(err);
 			}
 
 			/* Check the previous node page having this index */
@@ -369,7 +389,7 @@ static int do_recover_data(struct f2fs_sb_info *sbi, struct inode *inode,
 	recover_node_page(sbi, dn.node_page, &sum, &ni, blkaddr);
 err:
 	f2fs_put_dnode(&dn);
-	mutex_unlock_op(sbi, ilock);
+	f2fs_unlock_op(sbi);
 
 	f2fs_msg(sbi->sb, KERN_DEBUG, "recover_data: ino = %lx, "
 			"recovered_data = %d blocks, err = %d",
@@ -447,6 +467,7 @@ int recover_fsync_data(struct f2fs_sb_info *sbi)
 {
 	struct list_head inode_list;
 	int err;
+	bool need_writecp = false;
 
 	fsync_entry_slab = f2fs_kmem_cache_create("f2fs_fsync_inode_entry",
 			sizeof(struct fsync_inode_entry), NULL);
@@ -456,7 +477,7 @@ int recover_fsync_data(struct f2fs_sb_info *sbi)
 	INIT_LIST_HEAD(&inode_list);
 
 	/* step #1: find fsynced inode numbers */
-	sbi->por_doing = 1;
+	sbi->por_doing = true;
 	err = find_fsync_dnodes(sbi, &inode_list);
 	if (err) {
 		f2fs_msg(sbi->sb, KERN_INFO,
@@ -467,6 +488,8 @@ int recover_fsync_data(struct f2fs_sb_info *sbi)
 	if (list_empty(&inode_list))
 		goto out;
 
+	need_writecp = true;
+
 	/* step #2: recover data */
 	err = recover_data(sbi, &inode_list, CURSEG_WARM_NODE);
 	if (!list_empty(&inode_list)) {
@@ -476,8 +499,8 @@ int recover_fsync_data(struct f2fs_sb_info *sbi)
 out:
 	destroy_fsync_dnodes(&inode_list);
 	kmem_cache_destroy(fsync_entry_slab);
-	sbi->por_doing = 0;
-	if (!err) {
+	sbi->por_doing = false;
+	if (!err && need_writecp) {
 		f2fs_msg(sbi->sb, KERN_INFO, "recovery complete");
 		write_checkpoint(sbi, false);
 	} else

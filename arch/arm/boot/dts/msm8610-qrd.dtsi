@@ -135,13 +135,14 @@
 	};
 
     sound {
-        qcom,audio-routing =
-            "RX_BIAS", "MCLK",
-            "INT_LDO_H", "MCLK",
-            "MIC BIAS Internal1", "Handset Mic",
-            "MIC BIAS Internal2", "Headset Mic",
-            "AMIC1", "MIC BIAS Internal1",
-            "AMIC2", "MIC BIAS Internal2";
+	qcom,audio-routing =
+		"RX_BIAS", "MCLK",
+		"INT_LDO_H", "MCLK",
+		"MIC BIAS Internal1", "Handset Mic",
+		"MIC BIAS Internal2", "Headset Mic",
+		"AMIC1", "MIC BIAS Internal1",
+		"AMIC2", "MIC BIAS Internal2";
+	qcom,mbhc-bias-internal;
     };
 };
 
@@ -174,8 +175,9 @@
 		qcom,cdc-vdd-mic-bias-voltage = <3075000 3075000>;
 		qcom,cdc-vdd-mic-bias-current = <25000>;
 
+		qcom,cdc-micbias-ldoh-v = <0x3>;
 		qcom,cdc-micbias-cfilt-sel = <0x0>;
-		qcom,cdc-micbias-cfilt-mv = <1800000>;
+		qcom,cdc-micbias-cfilt-mv = <2700>;
 		qcom,cdc-mclk-clk-rate = <12288000>;
 
 		qcom,cdc-static-supplies = "cdc-vdda-h",
@@ -365,4 +367,8 @@
 &android_usb {
 	qcom,android-usb-cdrom;
 	qcom,android-usb-internal-ums;
+};
+
+&mdss_mdp {
+	batfet-supply = <&pm8110_chg_batif>;
 };

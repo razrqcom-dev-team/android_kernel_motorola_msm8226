@@ -28,6 +28,7 @@
 #include <linux/delay.h>
 #include <linux/input.h>
 #include <linux/gpio.h>
+#include <linux/ctype.h>
 #include <linux/jiffies.h>
 #include <linux/semaphore.h>
 #include <linux/regulator/consumer.h>
@@ -634,6 +635,24 @@ static inline struct synaptics_dsx_platform_data *
 }
 #endif
 
+#define HYPHEN		'-'
+#define letter_i	'i'
+#define letter_s	's'
+#define letter_t	't'
+
+static void synaptics_dsx_darn_product_string(unsigned char *id,
+		unsigned char *hyphen)
+{
+	if (*(hyphen+1) == toupper(letter_t)) {
+		memmove(id+1, id, hyphen-id);
+		hyphen++;
+		*hyphen++ = letter_t;
+	} else if (*(hyphen+1) == toupper(letter_i))
+		*hyphen++ = letter_i;
+	*id = letter_s;
+	*hyphen = 0;
+}
+
 static int synaptics_rmi4_i2c_read(struct synaptics_rmi4_data *rmi4_data,
 		unsigned short addr, unsigned char *data,
 		unsigned short length);
@@ -642,7 +661,8 @@ static int synaptics_rmi4_i2c_write(struct synaptics_rmi4_data *rmi4_data,
 		unsigned short addr, unsigned char *data,
 		unsigned short length);
 
-static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data);
+static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
+		unsigned char *f01_cmd_base_addr);
 
 static void synaptics_rmi4_sensor_sleep(struct synaptics_rmi4_data *rmi4_data);
 
@@ -660,7 +680,7 @@ static int synaptics_rmi4_irq_enable(struct synaptics_rmi4_data *rmi4_data,
 static void synaptics_dsx_sensor_state(struct synaptics_rmi4_data *rmi4_data,
 		int state);
 
-#ifdef CONFIG_FB
+#if defined(CONFIG_FB) && !defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
 static int synaptics_dsx_panel_cb(struct notifier_block *nb,
 		unsigned long event, void *data);
 #endif
@@ -703,6 +723,9 @@ static ssize_t synaptics_rmi4_hw_irqstat_show(struct device *dev,
 		struct device_attribute *attr, char *buf);
 
 static ssize_t synaptics_rmi4_ic_ver_show(struct device *dev,
+		struct device_attribute *attr, char *buf);
+
+static ssize_t synaptics_rmi4_poweron_show(struct device *dev,
 		struct device_attribute *attr, char *buf);
 
 struct synaptics_rmi4_f01_device_status {
@@ -813,6 +836,9 @@ static struct device_attribute attrs[] = {
 			synaptics_rmi4_store_error),
 	__ATTR(irqinfo, S_IRUSR | S_IRGRP,
 			synaptics_rmi4_irqtimes_show,
+			synaptics_rmi4_store_error),
+	__ATTR(poweron, S_IRUSR | S_IRGRP,
+			synaptics_rmi4_poweron_show,
 			synaptics_rmi4_store_error),
 };
 
@@ -1057,7 +1083,7 @@ static ssize_t synaptics_rmi4_f01_reset_store(struct device *dev,
 	if (reset != 1)
 		return -EINVAL;
 
-	retval = synaptics_rmi4_reset_device(rmi4_data);
+	retval = synaptics_rmi4_reset_device(rmi4_data, NULL);
 	if (retval < 0) {
 		dev_err(dev,
 				"%s: Failed to issue reset command, error = %d\n",
@@ -1320,6 +1346,13 @@ static ssize_t synaptics_rmi4_ic_ver_show(struct device *dev,
 			"Product ID: ", rmi->product_id_string,
 			"Build ID: ", build_id,
 			"Config ID: ", config_id);
+}
+
+static ssize_t synaptics_rmi4_poweron_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct synaptics_rmi4_data *rmi4_data = dev_get_drvdata(dev);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", rmi4_data->poweron);
 }
 
  /**
@@ -1620,6 +1653,7 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 	int wx;
 	int wy;
 	int z;
+	struct timespec hw_time = ktime_to_timespec(ktime_get());
 
 	/*
 	 * The number of finger status registers is determined by the
@@ -1641,6 +1675,11 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 
 	if (atomic_read(&rmi4_data->panel_off_flag))
 		return 0;
+
+	input_event(rmi4_data->input_dev, EV_SYN,
+			SYN_TIME_SEC, hw_time.tv_sec);
+	input_event(rmi4_data->input_dev, EV_SYN,
+			SYN_TIME_NSEC, hw_time.tv_nsec);
 
 	for (finger = 0; finger < fingers_supported; finger++) {
 		reg_index = finger / 4;
@@ -1669,7 +1708,7 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 					data,
 					data_reg_blk_size);
 			if (retval < 0)
-				return 0;
+				goto end;
 
 			x = (data[0] << 4) | (data[2] & MASK_4BIT);
 			y = (data[1] << 4) | ((data[2] >> 4) & MASK_4BIT);
@@ -1714,6 +1753,7 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 		}
 	}
 
+end:
 #ifndef TYPE_B_PROTOCOL
 	if (!touch_count)
 		input_mt_sync(rmi4_data->input_dev);
@@ -2511,6 +2551,7 @@ static int synaptics_rmi4_alloc_fh(struct synaptics_rmi4_fn **fhandler,
 static int synaptics_rmi4_query_device(struct synaptics_rmi4_data *rmi4_data)
 {
 	int retval;
+	unsigned char *hyphen;
 	unsigned char page_number;
 	unsigned char intr_count = 0;
 	unsigned char data_sources = 0;
@@ -2704,6 +2745,14 @@ static int synaptics_rmi4_query_device(struct synaptics_rmi4_data *rmi4_data)
 	memcpy(rmi->serial, &f01_query[4], SYNAPTICS_RMI4_SERIAL_SIZE);
 	memcpy(rmi->product_id_string, &f01_query[11],
 					SYNAPTICS_RMI4_PRODUCT_ID_SIZE);
+	rmi->product_id_string[SYNAPTICS_RMI4_PRODUCT_ID_SIZE] = 0;
+
+	/* handle wrongfully programmed product id strings here */
+	hyphen = strnchr(rmi->product_id_string,
+				SYNAPTICS_RMI4_PRODUCT_ID_SIZE, HYPHEN);
+	if (hyphen != NULL)
+		synaptics_dsx_darn_product_string(
+					rmi->product_id_string, hyphen);
 
 	retval = synaptics_rmi4_i2c_read(rmi4_data,
 			rmi4_data->f01_query_base_addr+PACKAGE_ID_OFFSET,
@@ -2819,7 +2868,8 @@ static void synaptics_dsx_on_resume(struct synaptics_rmi4_data *rmi4_data)
 	}
 }
 
-static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data)
+static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
+		unsigned char *f01_cmd_base_addr)
 {
 	int current_state, retval;
 	bool need_to_query = false;
@@ -2844,6 +2894,7 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data)
 		synaptics_dsx_ic_reset(rmi4_data, true);
 	else {
 		retval = synaptics_rmi4_i2c_write(rmi4_data,
+			f01_cmd_base_addr ? *f01_cmd_base_addr :
 			rmi4_data->f01_cmd_base_addr,
 			&command,
 			sizeof(command));
@@ -3078,7 +3129,6 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 	rmi4_data->ready_state = synaptics_dsx_sensor_ready_state;
 	rmi4_data->irq_enable = synaptics_rmi4_irq_enable;
 	rmi4_data->reset_device = synaptics_rmi4_reset_device;
-	rmi4_data->query_device = synaptics_rmi4_query_device;
 
 	/* Initialize some resume debug information */
 	rmi4_data->resume_info = kzalloc(
@@ -3167,10 +3217,24 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 
 	init_waitqueue_head(&rmi4_data->wait);
 
-#ifdef CONFIG_FB
+#if defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
+	rmi4_data->panel_nb.suspend = synaptics_rmi4_suspend;
+	rmi4_data->panel_nb.resume = synaptics_rmi4_resume;
+	rmi4_data->panel_nb.dev = &client->dev;
+	if (!mmi_panel_register_notifier(&rmi4_data->panel_nb))
+		pr_info("registered MMI panel notifier\n");
+	else
+		dev_err(&client->dev,
+				"%s: Unable to register MMI notifier\n",
+				__func__);
+#elif defined(CONFIG_FB)
 	rmi4_data->panel_nb.notifier_call = synaptics_dsx_panel_cb;
 	if (!fb_register_client(&rmi4_data->panel_nb))
-		pr_debug("registered panel notifier\n");
+		pr_debug("registered FB notifier\n");
+	else
+		dev_err(&client->dev,
+				"%s: Unable to register FB notifier\n",
+				__func__);
 #endif
 	mutex_lock(&exp_fn_ctrl_mutex);
 	if (!exp_fn_ctrl.inited) {
@@ -3211,7 +3275,9 @@ err_sysfs:
 				&attrs[attr_count].attr);
 	}
 
-#ifdef CONFIG_FB
+#if defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
+	mmi_panel_unregister_notifier(&rmi4_data->panel_nb);
+#elif defined(CONFIG_FB)
 	fb_unregister_client(&rmi4_data->panel_nb);
 #endif
 
@@ -3281,7 +3347,9 @@ static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 		regulator_put(rmi4_data->regulator);
 	}
 
-#ifdef CONFIG_FB
+#if defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
+	mmi_panel_unregister_notifier(&rmi4_data->panel_nb);
+#elif defined(CONFIG_FB)
 	fb_unregister_client(&rmi4_data->panel_nb);
 #endif
 	synaptics_rmi4_cleanup(rmi4_data);
@@ -3457,7 +3525,7 @@ static void synaptics_rmi4_sensor_wake(struct synaptics_rmi4_data *rmi4_data)
 	return;
 }
 
-#ifdef CONFIG_FB
+#if defined(CONFIG_FB) && !defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
 static int synaptics_dsx_panel_cb(struct notifier_block *nb,
 		unsigned long event, void *data)
 {
@@ -3503,6 +3571,8 @@ static int synaptics_rmi4_suspend(struct device *dev)
 			rmi4_data->board;
 
 	synaptics_dsx_sensor_state(rmi4_data, STATE_SUSPEND);
+	rmi4_data->poweron = false;
+
 	if (!rmi4_data->touch_stopped) {
 		if (platform_data->regulator_en) {
 			regulator_disable(rmi4_data->regulator);
@@ -3563,7 +3633,7 @@ static int synaptics_rmi4_resume(struct device *dev)
 		synaptics_dsx_on_resume(rmi4_data);
 
 		if (rmi4_data->reset_on_resume)
-			synaptics_rmi4_reset_device(rmi4_data);
+			synaptics_rmi4_reset_device(rmi4_data, NULL);
 		else if (wait4idle) {
 			retval = synaptics_dsx_ic_reset(rmi4_data, false);
 			pr_debug("waited for idle %dms\n", retval);
@@ -3571,6 +3641,7 @@ static int synaptics_rmi4_resume(struct device *dev)
 	}
 
 	synaptics_dsx_sensor_ready_state(rmi4_data, false);
+	rmi4_data->poweron = true;
 
 	return 0;
 }
